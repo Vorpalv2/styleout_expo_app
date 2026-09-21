@@ -2,6 +2,79 @@
 
 An Expo 57 wardrobe and outfit styling app with Clerk authentication and Supabase storage.
 
+Most AI "try-on" apps send your photos to a third-party API directly from the client. That's a security nightmare waiting to happen.
+
+Styleout fixes this with a clean server-side AI pipeline — and the architecture is worth breaking down.
+
+---
+
+**What it does:**
+Users upload their wardrobe pieces + a full-length photo of themselves. Select up to 2 garments → the app generates a photorealistic try-on image of *you* wearing those exact pieces.
+
+No filters. No overlays. Actual AI-generated imagery.
+
+---
+
+**The Stack:**
+⚙️ Expo 57 + React Native 0.86 + TypeScript
+🔐 Clerk Auth → Supabase RLS (native JWT integration)
+🗄️ Supabase (Postgres + Storage + Edge Functions / Deno)
+🤖 Vercel AI Gateway → SpaceXAI's `grok-imagine-image` model
+🎞️ React Native Reanimated 4 + Worklets
+
+---
+
+**The Old Way vs The New Way:**
+
+❌ **Old Way**
+- Store the AI provider key in `.env` on the client (or worse, hardcode it)
+- Write custom middleware to validate auth before every DB operation
+- Call the AI model directly from the device — key exposed, no control
+- Use `setTimeout` hacks to keep async jobs alive server-side
+- Saved looks break when a wardrobe item gets edited later
+
+✅ **New Way (Styleout)**
+- AI key lives only in a Supabase Edge Function (Deno) — never touches the phone
+- Clerk's native Supabase integration issues JWTs with the `authenticated` role — RLS just works, zero custom middleware
+- Vercel AI Gateway abstracts the model call, handles credits, routes to SpaceXAI — one clean interface for model switching later
+- `EdgeRuntime.waitUntil()` keeps the generation job alive *after* the HTTP response is returned — no timeout hacks
+- Saved looks snapshot garment data at save-time — edits to wardrobe items never corrupt past looks
+
+---
+
+**The detail I'm most proud of:**
+The Clerk → Supabase JWT handshake. When a user authenticates with Clerk, that session token is recognized natively by Supabase as the `authenticated` role. Row-Level Security policies enforce per-user data access automatically — no proxy, no extra auth layer, no boilerplate.
+
+It's the kind of integration that makes you wonder why we ever built auth differently.
+
+---
+
+**On the generation flow:**
+The app fires a request → Edge Function picks it up → calls Vercel AI Gateway → SpaceXAI's Grok Imagine model processes the reference images → status gets polled client-side. If a job goes stale past 150s, a retry is allowed.
+
+Clean. Auditable. Entirely server-contained.
+
+---
+
+Built with **Expo Router** for file-based navigation, **private signed URLs** for per-user image storage, and **Postgres functions** (`save_styleout_look_v2`) for transactional DB writes.
+
+This is what modern React Native architecture looks like when you stop cutting corners on security and data integrity.
+
+---
+
+🏷️ Tech Stack Badges:
+![Static Badge](https://img.shields.io/badge/TypeScript-3178C6?logo=typescript&logoColor=white&color=3178C6)
+![Static Badge](https://img.shields.io/badge/React_Native-61DAFB?logo=react&logoColor=black&color=61DAFB)
+![Static Badge](https://img.shields.io/badge/Expo-000020?logo=expo&logoColor=white&color=000020)
+![Static Badge](https://img.shields.io/badge/Node.js-339933?logo=nodedotjs&logoColor=white&color=339933)
+![Static Badge](https://img.shields.io/badge/Supabase-3ECF8E?logo=supabase&logoColor=white&color=3ECF8E)
+![Static Badge](https://img.shields.io/badge/PostgreSQL-4169E1?logo=postgresql&logoColor=white&color=4169E1)
+![Static Badge](https://img.shields.io/badge/Vercel-000000?logo=vercel&logoColor=white&color=000000)
+![Static Badge](https://img.shields.io/badge/Clerk-6C47FF?logo=clerk&logoColor=white&color=6C47FF)
+
+#ReactNative #ExpoSDK #Supabase #ClerkAuth #AIEngineering #MobileArchitecture #VercelAI #TypeScript #FullStack
+
+
 ## Run
 
 1. Copy `.env.example` to `.env.local` and set the Clerk and Supabase public keys and Supabase project URL.
