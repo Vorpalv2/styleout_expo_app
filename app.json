@@ -1,0 +1,60 @@
+{
+  "expo": {
+    "name": "Styleout",
+    "slug": "styleout",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/images/icon.png",
+    "scheme": "styleout",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "bundleIdentifier": "com.styleout.app",
+      "supportsTablet": true
+    },
+    "android": {
+      "package": "com.styleout.app",
+      "adaptiveIcon": {
+        "backgroundColor": "#F6F6F3",
+        "foregroundImage": "./assets/images/android-icon-foreground.png",
+        "backgroundImage": "./assets/images/android-icon-background.png",
+        "monochromeImage": "./assets/images/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "static",
+      "favicon": "./assets/images/favicon.png"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      "@clerk/expo",
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "Styleout saves generated looks to your photo library."
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Styleout uses your photos to add wardrobe pieces and a full-length styling photo.",
+          "cameraPermission": false,
+          "microphonePermission": false
+        }
+      ],
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/images/splash-icon.png",
+          "resizeMode": "contain",
+          "backgroundColor": "#ffffff"
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}

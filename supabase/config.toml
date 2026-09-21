@@ -1,0 +1,3 @@
+[functions.generate-styleout-look]
+verify_jwt = false
+entrypoint = './functions/generate-styleout-look/index.js'
