@@ -4,7 +4,7 @@ import * as Crypto from 'expo-crypto';
 import { Directory, File, Paths } from 'expo-file-system';
 import * as ImagePicker from 'expo-image-picker';
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, AppState, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Alert, AppState, Linking, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { palette } from '@/components/StyleoutUI';
 import { createStyleoutClient, IMAGE_BUCKET } from '@/lib/supabase';
 
@@ -42,6 +42,8 @@ export function lookSignature(imagePath: string | null, selections: LookSelectio
 }
 type NewItem = Omit<ClosetItem, 'id' | 'imagePath'>;
 type ItemChanges = Omit<NewItem, 'image'> & { image?: string };
+export type WardrobeDraft = { image: string; category: Category; slotIndex: number | null };
+export type PendingStyleSelection = { slotIndex: number; item: ClosetItem };
 const TITLE_PREFIX = '__styleout_title__:';
 function titleFromPieces(pieces: string[] | null) { return pieces?.[0]?.startsWith(TITLE_PREFIX) ? pieces[0].slice(TITLE_PREFIX.length) : null; }
 function cleanPieces(pieces: string[] | null) { return titleFromPieces(pieces) ? (pieces || []).slice(1) : pieces || []; }
@@ -55,15 +57,22 @@ type ClosetState = {
   savedLooks: SavedLook[];
   previousWardrobeAvailable: boolean;
   importPreviousWardrobe: () => Promise<void>;
-  addItem: (item: NewItem) => Promise<void>;
+  addItem: (item: NewItem) => Promise<ClosetItem>;
   updateItem: (id: string, changes: ItemChanges) => Promise<void>;
   removeItem: (id: string) => Promise<void>;
   updateProfile: (name: string, bio: string) => Promise<void>;
   setBodyPhoto: (uri: string) => Promise<void>;
   selectMainPhoto: (path: string) => Promise<void>;
   deleteMainPhoto: (path: string) => Promise<void>;
+  refreshCloset: () => Promise<void>;
+  wardrobeDraft: WardrobeDraft | null;
+  beginWardrobeDraft: (draft: WardrobeDraft) => void;
+  clearWardrobeDraft: () => void;
+  pendingStyleSelection: PendingStyleSelection | null;
+  queueStyleSelection: (selection: PendingStyleSelection) => void;
+  clearPendingStyleSelection: () => void;
   saveLook: (title: string, selections: LookSelection[], pieces: string[]) => Promise<string>;
-  generateLook: (id: string) => Promise<void>;
+  generateLook: (id: string, instructions?: string) => Promise<void>;
   updateLookTitle: (id: string, title: string) => Promise<void>;
   removeLook: (id: string) => Promise<void>;
 };
@@ -91,6 +100,32 @@ export async function pickPhoto(): Promise<string | null> {
     return await keepImage(asset.uri);
   } catch {
     Alert.alert('Photo unavailable', 'Please try selecting the photo again.');
+    return null;
+  }
+}
+
+export async function takePhoto(): Promise<string | null> {
+  try {
+    if (Platform.OS !== 'web') {
+      const permission = await ImagePicker.requestCameraPermissionsAsync();
+      if (!permission.granted) {
+        Alert.alert('Camera access needed', 'Allow camera access in Settings to photograph an item for your wardrobe.', [
+          { text: 'Not now', style: 'cancel' },
+          { text: 'Open Settings', onPress: () => { void Linking.openSettings(); } },
+        ]);
+        return null;
+      }
+    }
+    const result = await ImagePicker.launchCameraAsync({
+      mediaTypes: ['images'], allowsEditing: true, aspect: [4, 5], quality: 0.8,
+      base64: Platform.OS === 'web',
+    });
+    if (result.canceled || !result.assets[0]) return null;
+    const asset = result.assets[0];
+    if (Platform.OS === 'web' && asset.base64) return `data:${asset.mimeType || 'image/jpeg'};base64,${asset.base64}`;
+    return await keepImage(asset.uri);
+  } catch {
+    Alert.alert('Camera unavailable', 'The camera could not open. Please try again.');
     return null;
   }
 }
@@ -152,6 +187,8 @@ export function ClosetProvider({ children, userId }: { children: React.ReactNode
   const [previousWardrobeAvailable, setPreviousWardrobeAvailable] = useState(false);
   const [ready, setReady] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [wardrobeDraft, setWardrobeDraft] = useState<WardrobeDraft | null>(null);
+  const [pendingStyleSelection, setPendingStyleSelection] = useState<PendingStyleSelection | null>(null);
 
   const refresh = useCallback(async () => {
     if (!client || !userId) return;
@@ -250,7 +287,9 @@ export function ClosetProvider({ children, userId }: { children: React.ReactNode
     try {
       const { data, error } = await client.from('wardrobe_items').insert({ user_id: userId, image_path: imagePath, name: item.name, category: item.category, color: item.color, brand: item.brand, notes: item.notes, source_id: sourceId || null }).select('id').single();
       if (error) throw error;
-      setItems((current) => [{ ...item, id: data.id, imagePath, image: item.image }, ...current]);
+      const savedItem = { ...item, id: data.id, imagePath, image: item.image };
+      setItems((current) => [savedItem, ...current]);
+      return savedItem;
     } catch (error) {
       await client.storage.from(IMAGE_BUCKET).remove([imagePath]);
       throw error;
@@ -258,6 +297,13 @@ export function ClosetProvider({ children, userId }: { children: React.ReactNode
   };
   const value: ClosetState = {
     items, name, bio, bodyPhoto, bodyPhotoPath, mainPhotos, savedLooks, previousWardrobeAvailable,
+    refreshCloset: refresh,
+    wardrobeDraft,
+    beginWardrobeDraft: setWardrobeDraft,
+    clearWardrobeDraft: () => setWardrobeDraft(null),
+    pendingStyleSelection,
+    queueStyleSelection: setPendingStyleSelection,
+    clearPendingStyleSelection: () => setPendingStyleSelection(null),
     addItem,
     updateItem: async (id, changes) => {
       if (!userId) throw new Error('Sign in to edit your wardrobe.');
@@ -370,11 +416,11 @@ export function ClosetProvider({ children, userId }: { children: React.ReactNode
       }, ...current]);
       return String(data);
     },
-    generateLook: async (id) => {
+    generateLook: async (id, instructions = '') => {
       const token = await getTokenRef.current();
       if (!token) throw new Error('Sign in to generate a look.');
       const { data, error } = await client.functions.invoke('generate-styleout-look', {
-        body: { lookId: id }, headers: { Authorization: `Bearer ${token}` },
+        body: { lookId: id, instructions: instructions.trim() }, headers: { Authorization: `Bearer ${token}` },
       });
       if (error) {
         const response = 'context' in error ? error.context : null;

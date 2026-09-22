@@ -96,3 +96,18 @@ A new saved style keeps the path of the main photo used at save time and links e
 The Style page's **Generate AI look** action saves the current named look, then invokes the deployed `generate-styleout-look` Supabase Edge Function with only its saved-look ID. The function checks the caller's Clerk JWT through Supabase row policies, reads the saved source photo and garment snapshots from the private bucket, sends them to `spacexai/grok-imagine-image` through Vercel AI Gateway, and writes the result to `styleout-images/<user-id>/generated/<look-id>/`. This model accepts up to three reference images, so AI generation takes the user's photo and at most two wardrobe pieces; styles with more pieces can still be saved. The resulting path and generation status belong to the saved look. The app polls while generation runs and shows the result in Style and Profile. A stopped job can be retried after 150 seconds.
 
 The function source is in [supabase/functions/generate-styleout-look/index.js](supabase/functions/generate-styleout-look/index.js); [supabase/config.toml](supabase/config.toml) disables the legacy gateway JWT check so the function can authorize Clerk tokens with Supabase RLS. Deploy the function after code changes. Set `AI_GATEWAY_API_KEY` in **Supabase → Edge Functions → Secrets**. Keep the key off the phone. Generation sends the user's selected photos through Vercel AI Gateway to SpaceXAI; clear JPEG, PNG, or WebP photos give the best results. Source and garment photos remain private in Supabase; generated images use signed URLs. Image rendering can take around two minutes and may not reproduce every garment detail perfectly.
+
+## Instagram photo import
+
+Profile includes a premium-labelled Instagram connection card. Billing is intentionally not enforced yet. A connected user can browse image posts, select at most two at a time, and copy them into the same private `styleout-images/<user-id>/main/` storage path used by manually uploaded photos. The first selected image becomes the active styling photo.
+
+Apply [the Instagram migration](supabase/migrations/20260921000000_instagram_imports.sql), then deploy `instagram-oauth-start`, `instagram-oauth-callback`, and `instagram-media`. Add these Supabase Edge Function secrets:
+
+- `META_APP_ID`: the Meta app ID.
+- `META_APP_SECRET`: the Meta app secret.
+- `INSTAGRAM_TOKEN_ENCRYPTION_KEY`: a random value of at least 32 characters used to encrypt stored access tokens.
+- `META_GRAPH_VERSION`: retained for compatibility with older deployments; Instagram Login uses the versionless Instagram Graph host.
+- `INSTAGRAM_CALLBACK_URL`: optional; defaults to `https://<project-ref>.supabase.co/functions/v1/instagram-oauth-callback`.
+- `STYLEOUT_WEB_URL`: the deployed web origin. Localhost and the `styleout://` native scheme are already accepted.
+
+Add the exact callback URL to the Meta app's Instagram Login OAuth settings and request `instagram_business_basic`. The user must have an Instagram Creator or Business account; a Facebook Page is not required. App roles can test while the Meta app is in development mode; public users require the relevant Meta review and live-mode configuration.

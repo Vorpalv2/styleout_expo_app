@@ -40,7 +40,7 @@
         "expo-image-picker",
         {
           "photosPermission": "Styleout uses your photos to add wardrobe pieces and a full-length styling photo.",
-          "cameraPermission": false,
+          "cameraPermission": "Styleout uses your camera to photograph clothing and accessories for your wardrobe.",
           "microphonePermission": false
         }
       ],

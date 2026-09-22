@@ -1,3 +1,15 @@
 [functions.generate-styleout-look]
 verify_jwt = false
 entrypoint = './functions/generate-styleout-look/index.js'
+
+[functions.instagram-oauth-start]
+verify_jwt = false
+entrypoint = './functions/instagram-oauth-start/index.js'
+
+[functions.instagram-oauth-callback]
+verify_jwt = false
+entrypoint = './functions/instagram-oauth-callback/index.js'
+
+[functions.instagram-media]
+verify_jwt = false
+entrypoint = './functions/instagram-media/index.js'

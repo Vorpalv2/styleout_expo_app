@@ -1,11 +1,13 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useRouter, type Href } from 'expo-router';
 import { Alert, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { AppHeader, palette, RoundAction, SamplePieceImage, samplePieces, SmallCaps } from '@/components/StyleoutUI';
 import { LoadingImage } from '@/components/LoadingImage';
 import { CATEGORIES, Category, ClosetItem, pickPhoto, useCloset } from '@/lib/closet';
 
 export default function WardrobeScreen() {
-  const { items, addItem, updateItem, removeItem } = useCloset();
+  const router = useRouter();
+  const { items, addItem, updateItem, removeItem, wardrobeDraft, clearWardrobeDraft, queueStyleSelection } = useCloset();
   const [filter, setFilter] = useState('All');
   const [draftImage, setDraftImage] = useState<string | null>(null);
   const [name, setName] = useState('');
@@ -17,21 +19,32 @@ export default function WardrobeScreen() {
   const [editingItem, setEditingItem] = useState<ClosetItem | null>(null);
   const [replacementImage, setReplacementImage] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [draftOriginSlot, setDraftOriginSlot] = useState<number | null>(null);
   const shown = filter === 'All' ? items : items.filter((item) => item.category === filter);
+
+  useEffect(() => {
+    if (!wardrobeDraft) return;
+    setEditingItem(null); setReplacementImage(null);
+    setName(''); setCategory(wardrobeDraft.category); setColor(''); setBrand(''); setNotes('');
+    setDraftOriginSlot(wardrobeDraft.slotIndex);
+    setDraftImage(wardrobeDraft.image);
+    clearWardrobeDraft();
+  }, [wardrobeDraft?.image]);
 
   async function startAdd() {
     const image = await pickPhoto();
     if (!image) return;
+    setDraftOriginSlot(null);
     setEditingItem(null); setReplacementImage(null);
     setName(''); setCategory('Tops'); setColor(''); setBrand(''); setNotes('');
     setDraftImage(image);
   }
   function startEdit(item: ClosetItem) {
-    setDetail(null); setEditingItem(item); setReplacementImage(null);
+    setDetail(null); setEditingItem(item); setReplacementImage(null); setDraftOriginSlot(null);
     setDraftImage(item.image); setName(item.name); setCategory(item.category);
     setColor(item.color); setBrand(item.brand); setNotes(item.notes);
   }
-  function closeForm() { setDraftImage(null); setEditingItem(null); setReplacementImage(null); }
+  function closeForm() { setDraftImage(null); setEditingItem(null); setReplacementImage(null); setDraftOriginSlot(null); }
   async function changeDraftPhoto() {
     const image = await pickPhoto();
     if (image) { setDraftImage(image); setReplacementImage(image); }
@@ -41,10 +54,16 @@ export default function WardrobeScreen() {
     setSaving(true);
     try {
       const changes = { name: name.trim(), category, color: color.trim(), brand: brand.trim(), notes: notes.trim() };
+      let savedItem: ClosetItem | null = null;
       if (editingItem) await updateItem(editingItem.id, { ...changes, ...(replacementImage ? { image: replacementImage } : {}) });
-      else await addItem({ ...changes, image: draftImage });
+      else savedItem = await addItem({ ...changes, image: draftImage });
+      const originSlot = draftOriginSlot;
       closeForm();
       setFilter('All');
+      if (savedItem && originSlot !== null) {
+        queueStyleSelection({ slotIndex: originSlot, item: savedItem });
+        router.navigate('/' as Href);
+      }
     } catch (error) { Alert.alert('Save failed', error instanceof Error ? error.message : 'Your piece could not be saved. Please try again.'); }
     finally { setSaving(false); }
   }

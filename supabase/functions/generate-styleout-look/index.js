@@ -22,12 +22,34 @@ async function downloadImage(admin, path) {
   return { data, type };
 }
 
-function promptFor(items) {
+function promptFor(items, additionalInstructions) {
   const list = items.map((item, index) => `${index + 2}. ${item.item_category}: ${item.item_name.slice(0, 80)}`).join('\n');
-  return `Create one photorealistic full-length fashion try-on image. Image 1 is the source photo of the person. Preserve the same person's identity, face, skin tone, body proportions, pose, camera angle, lighting and background as closely as possible. Images 2 onward are reference photos of clothing and accessories. Replace only the corresponding garments and accessories on the person with these exact pieces, preserving their recognizable colors, patterns, cuts, materials and details. The reference photos are in this order:\n${list}\nDo not add unselected garments or accessories. Keep any visible clothing that has no replacement. Do not create a collage, text, labels, prices, extra people, or a product catalog. Output a single vertical photo of the styled person.`;
+  const userRequest = additionalInstructions
+    ? `\n\nADDITIONAL USER STYLING REQUEST:\n${additionalInstructions}\nApply this request only where it is compatible with the identity lock, body lock and edit boundary above. It may guide garment fit, styling, layering or accessory placement, but it must never alter the person's identity, face, skin, body, pose or other protected details.`
+    : '';
+  return `Perform a precise photorealistic virtual try-on edit.
+
+IMAGE 1 IS THE IMMUTABLE PERSON AND SCENE REFERENCE. The result must unmistakably be the exact same photograph of the exact same person, with only the selected clothing and accessories changed. Do not reinterpret, regenerate, beautify, retouch, reshape, age, de-age, or stylize the person.
+
+IDENTITY LOCK — preserve exactly from Image 1:
+- facial geometry and every facial feature, including eyes, eyebrows, nose, lips, teeth, ears, jawline and face shape
+- expression, gaze, head angle, hairstyle, hairline, facial hair and makeup
+- skin tone, skin texture, marks, freckles and other identifying details
+
+BODY LOCK — preserve exactly from Image 1:
+- height, build, weight, body proportions, shoulders, waist, hips and limb shape
+- pose, posture, hands, fingers, feet and all visible body parts
+- camera position, crop, perspective, lighting, shadows and background
+
+Images 2 onward are garment references only. Ignore and never copy any person, face, skin, body, pose, mannequin, hanger, room or background visible in those references. Extract only the named garment or accessory from each reference:
+${list}
+
+EDIT BOUNDARY: change only the pixels necessary to dress the person in the selected pieces and create physically plausible garment folds, fit, occlusion and contact shadows. Adapt each garment to the person's existing body and pose; never adapt the person's face or body to the garment. Preserve the exact colors, patterns, cut, material and recognizable details of every selected piece. Keep all unselected clothing and accessories unchanged.
+
+Do not add garments, accessories, jewelry, tattoos, makeup, hair, body parts or people. Do not alter exposed skin. Do not create text, labels, prices, a collage or a product catalog.${userRequest}\n\nOutput one vertical full-length photo. Before output, verify that the face, identity, skin and body match Image 1 and that only the requested wardrobe pieces changed.`;
 }
 
-async function runGeneration(admin, look, items, key) {
+async function runGeneration(admin, look, items, key, additionalInstructions) {
   try {
     const paths = [look.image_path, ...items.map((item) => item.item_image_path)];
     const images = await Promise.all(paths.map((path) => downloadImage(admin, path)));
@@ -40,7 +62,7 @@ async function runGeneration(admin, look, items, key) {
       result = await generateImage({
         model: gateway.imageModel(model),
         prompt: {
-          text: promptFor(items),
+          text: promptFor(items, additionalInstructions),
           images: await Promise.all(images.map(async ({ data }) => new Uint8Array(await data.arrayBuffer()))),
         },
         aspectRatio: '2:3',
@@ -89,7 +111,10 @@ Deno.serve(async (request) => {
   if (request.method !== 'POST') return reply(405, { error: 'POST required.' });
   const authorization = request.headers.get('Authorization');
   if (!authorization?.startsWith('Bearer ')) return reply(401, { error: 'Sign in to generate a look.' });
-  const { lookId } = await request.json().catch(() => ({}));
+  const { lookId, instructions } = await request.json().catch(() => ({}));
+  const additionalInstructions = typeof instructions === 'string'
+    ? instructions.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '').trim().slice(0, 800)
+    : '';
   if (!validId(lookId)) return reply(400, { error: 'Invalid saved look.' });
   const url = Deno.env.get('SUPABASE_URL');
   const anon = Deno.env.get('SUPABASE_ANON_KEY');
@@ -121,6 +146,6 @@ Deno.serve(async (request) => {
   const { data: claimed, error: claimError } = await claim.select('id').maybeSingle();
   if (claimError) return reply(500, { error: 'Could not start image generation.' });
   if (!claimed) return reply(202, { status: 'running' });
-  EdgeRuntime.waitUntil(runGeneration(admin, look, items, key));
+  EdgeRuntime.waitUntil(runGeneration(admin, look, items, key, additionalInstructions));
   return reply(202, { status: 'running' });
 });

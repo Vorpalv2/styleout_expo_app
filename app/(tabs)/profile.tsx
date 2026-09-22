@@ -6,6 +6,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AppHeader, palette, RoundAction, SmallCaps } from '@/components/StyleoutUI';
 import { PicChangeCarousel } from '@/components/PicChangeCarousel';
 import { LoadingImage } from '@/components/LoadingImage';
+import { InstagramImport } from '@/components/InstagramImport';
 import { CATEGORIES, SavedLook, useCloset } from '@/lib/closet';
 import { downloadImage } from '@/lib/saveImage';
 
@@ -87,6 +88,7 @@ export default function ProfileScreen() {
             <View style={s.styleCopy}><SmallCaps>THE FITTING ROOM</SmallCaps><Text style={s.styleHeading}>{bodyPhoto ? 'Your photo is ready' : 'Make it personal'}</Text><Text style={s.styleBody}>{bodyPhoto ? 'Explore the edit with your own full-length photo.' : 'Add a full-length photo to see yourself in the styling space.'}</Text><Pressable onPress={changePhoto}><Text style={s.styleLink}>{bodyPhoto ? 'Change photo ↗' : 'Add my photo ↗'}</Text></Pressable></View>
           </View>
         </View>
+        <InstagramImport />
         {previousWardrobeAvailable ? <View style={s.importCard}><SmallCaps>FROM BEFORE SIGN-IN</SmallCaps><Text style={s.importTitle}>Bring in your previous wardrobe</Text><Text style={s.importCopy}>Your earlier pieces are still on this device. Add them to this account when you’re ready.</Text><Pressable onPress={bringPreviousWardrobe} style={s.importButton}><Text style={s.importButtonText}>Import my pieces  ↗</Text></Pressable></View> : null}
         {savedLooks.length ? <View style={s.savedSection}><View style={s.savedSectionHead}><SmallCaps>SAVED LOOKS</SmallCaps><Pressable onPress={() => router.push('/looks' as Href)} accessibilityRole="button" accessibilityLabel="View all saved looks"><Text style={s.viewAll}>View all looks  ↗</Text></Pressable></View>{savedLooks.slice(0, 3).map((look) => <Pressable key={look.id} onPress={() => setSelectedLook(look)} style={s.savedRow}><LoadingImage source={look.generatedImage ? { uri: look.generatedImage } : look.image ? { uri: look.image } : lookImage} style={s.savedImage} /><View style={{ flex: 1 }}><Text style={s.savedTitle}>{look.title}</Text><Text style={s.savedMeta}>{look.generationStatus === 'running' ? look.generationStartedAt && Date.now() - look.generationStartedAt >= 150000 ? 'AI image delayed · ' : 'Generating AI image… · ' : look.generatedImage ? 'AI image ready · ' : ''}{look.selections.length} linked {look.selections.length === 1 ? 'piece' : 'pieces'} · {new Date(look.savedAt).toLocaleDateString()}</Text></View><Text style={s.savedHeart}>↗</Text></Pressable>)}</View> : null}
         <View style={s.categories}><Pressable onPress={() => setWardrobeExpanded((expanded) => !expanded)} accessibilityRole="button" accessibilityLabel={`${wardrobeExpanded ? 'Collapse' : 'Expand'} wardrobe categories`} style={s.categoriesHeader}><SmallCaps>IN YOUR WARDROBE</SmallCaps><Text style={[s.categoriesArrow, wardrobeExpanded && s.categoriesArrowOpen]}>⌄</Text></Pressable>
