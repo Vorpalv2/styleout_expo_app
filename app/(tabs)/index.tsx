@@ -1,7 +1,7 @@
 import { useRouter, type Href } from 'expo-router';
 import { useClerk } from '@clerk/expo';
 import { useEffect, useState } from 'react';
-import { Alert, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
+import { Alert, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, useWindowDimensions, View } from 'react-native';
 import { AppHeader, palette, RoundAction, samplePieces, SmallCaps } from '@/components/StyleoutUI';
 import { LoadingImage } from '@/components/LoadingImage';
 import { PicChangeCarousel } from '@/components/PicChangeCarousel';
@@ -26,7 +26,7 @@ export default function StyleScreen() {
   const { height } = useWindowDimensions();
   const { signOut } = useClerk();
   const { bodyPhoto, bodyPhotoPath, items, savedLooks, saveLook, generateLook, updateLookTitle,
-    beginWardrobeDraft, pendingStyleSelection, clearPendingStyleSelection } = useCloset();
+    updateLookBackgroundBlur, beginWardrobeDraft, pendingStyleSelection, clearPendingStyleSelection } = useCloset();
   const [styleName, setStyleName] = useState('');
   const [active, setActive] = useState(1);
   const [swapOpen, setSwapOpen] = useState(false);
@@ -34,6 +34,7 @@ export default function StyleScreen() {
   const [instructionOpen, setInstructionOpen] = useState(false);
   const [generationInstructions, setGenerationInstructions] = useState('');
   const [instructionDraft, setInstructionDraft] = useState('');
+  const [backgroundBlur, setBackgroundBlur] = useState(false);
   const [chosen, setChosen] = useState<Record<number, ClosetItem>>({});
   const [saving, setSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
@@ -46,7 +47,7 @@ export default function StyleScreen() {
   const generating = savedLook?.generationStatus === 'running' && (!savedLook.generationStartedAt || Date.now() - savedLook.generationStartedAt < 150000);
   const generateLabel = savedLook?.generatedImage ? 'View look' : generating ? 'Generating' : saving ? 'Starting' : savedLook?.generationStatus === 'failed' || savedLook?.generationStatus === 'running' ? 'Retry' : 'Generate';
   const saveLabel = saving ? 'Saving' : savedLook && styleName.trim() !== savedLook.title ? 'Update' : savedLook ? 'Saved looks' : 'Save look';
-  useEffect(() => { if (savedLook) setStyleName(savedLook.title); }, [savedLook?.id]);
+  useEffect(() => { if (savedLook) { setStyleName(savedLook.title); setBackgroundBlur(savedLook.backgroundBlur); } }, [savedLook?.id]);
   useEffect(() => {
     if (!pendingStyleSelection) return;
     setChosen((current) => ({ ...current, [pendingStyleSelection.slotIndex]: pendingStyleSelection.item }));
@@ -76,7 +77,7 @@ export default function StyleScreen() {
           setSaveMessage('Style name updated.');
         } else router.push('/profile' as Href);
       } else {
-        await saveLook(styleName, selections, selectedNames);
+        await saveLook(styleName, selections, selectedNames, backgroundBlur);
         setSaveMessage('Style saved with your selected wardrobe pieces.');
       }
     } catch (error) {
@@ -93,13 +94,23 @@ export default function StyleScreen() {
       if (selections.length > 2) throw new Error('Grok Imagine can use your photo and up to two wardrobe pieces. Select one or two pieces to generate this look.');
       let id = savedLook?.id;
       if (id && title !== savedLook?.title) await updateLookTitle(id, title);
-      if (!id) id = await saveLook(title, selections, selectedNames);
-      await generateLook(id, generationInstructions);
+      if (!id) id = await saveLook(title, selections, selectedNames, backgroundBlur);
+      await generateLook(id, generationInstructions, backgroundBlur);
       setSaveMessage('Your AI look is generating. It will appear here and in Saved Looks when ready.');
     } catch (error) {
       const detail = error instanceof Error ? error.message : 'Please try again.';
       setSaveMessage(detail); Alert.alert('Could not generate AI look', detail);
     } finally { setSaving(false); }
+  }
+  async function changeBackgroundBlur(value: boolean) {
+    const previous = backgroundBlur;
+    setBackgroundBlur(value);
+    if (!savedLook) return;
+    try { await updateLookBackgroundBlur(savedLook.id, value); }
+    catch (error) {
+      setBackgroundBlur(previous);
+      Alert.alert('Could not save setting', error instanceof Error ? error.message : 'Please try again.');
+    }
   }
 
   return (
@@ -150,6 +161,13 @@ export default function StyleScreen() {
               <Text style={s.actionIcon}>{savedLook ? '✓' : '♡'}</Text>
               <Text style={s.actionLabel}>{saveLabel}</Text>
             </Pressable>
+          </View>
+          <View style={s.blurSetting}>
+            <View style={s.blurCopy}>
+              <Text style={s.blurTitle}>Background blur</Text>
+              <Text style={s.blurHint}>Keep you and your outfit in focus</Text>
+            </View>
+            <Switch accessibilityLabel="Blur background for AI look" value={backgroundBlur} onValueChange={changeBackgroundBlur} trackColor={{ false: '#D8D9D3', true: palette.olive }} thumbColor="#fff" />
           </View>
           <Text style={s.helpText}>{savedLook?.generationStatus === 'failed' ? savedLook.generationError || 'Image generation failed. You can retry.' : savedLook?.generationStatus === 'running' && !generating ? 'Generation took too long. Tap Retry AI look.' : saveMessage || (!bodyPhotoPath ? 'Add your photo, then choose wardrobe pieces to save a style.' : !selections.length ? 'Swap in at least one piece from your wardrobe to save this style.' : selections.length > 2 ? 'This AI model can use up to two wardrobe pieces with your photo. You can still save this style.' : `${selections.length} ${selections.length === 1 ? 'piece' : 'pieces'} selected from your wardrobe. AI generation uses these photos and saves the result with this style.`)}</Text>
         </View>
@@ -214,6 +232,8 @@ const s = StyleSheet.create({
   actionIcon: { color: palette.ink, fontSize: 21, lineHeight: 23, fontWeight: '500' }, actionPrimaryIcon: { color: palette.olive },
   actionLabel: { color: palette.ink, fontSize: 10, lineHeight: 13, fontWeight: '700', letterSpacing: 0.15, textAlign: 'center' }, actionPrimaryLabel: { color: palette.olive }, actionActive: { color: palette.olive },
   actionDot: { position: 'absolute', right: -5, top: -1, width: 5, height: 5, borderRadius: 3, backgroundColor: palette.olive },
+  blurSetting: { minHeight: 55, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 3, borderBottomWidth: 1, borderBottomColor: palette.line },
+  blurCopy: { flex: 1, paddingVertical: 7 }, blurTitle: { color: palette.ink, fontSize: 12, fontWeight: '700' }, blurHint: { color: palette.muted, fontSize: 10, marginTop: 3 },
   helpText: { textAlign: 'center', color: palette.muted, fontSize: 11, marginTop: 13 },
   backdrop: { flex: 1, justifyContent: 'flex-end', backgroundColor: '#0006' }, modal: { backgroundColor: '#fff', borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 24, paddingBottom: 38 },
   handle: { alignSelf: 'center', width: 34, height: 4, borderRadius: 3, backgroundColor: '#D9D9D5', marginBottom: 22 },

@@ -33,6 +33,7 @@ export type SavedLook = {
   generationStatus: 'idle' | 'running' | 'complete' | 'failed';
   generationError: string | null;
   generationStartedAt: number | null;
+  backgroundBlur: boolean;
   pieces: string[];
   selections: Array<LookSelection & { item: ClosetItem | null; itemName: string; itemCategory: string; itemImagePath: string; itemImage: string | null }>;
   savedAt: number;
@@ -71,8 +72,9 @@ type ClosetState = {
   pendingStyleSelection: PendingStyleSelection | null;
   queueStyleSelection: (selection: PendingStyleSelection) => void;
   clearPendingStyleSelection: () => void;
-  saveLook: (title: string, selections: LookSelection[], pieces: string[]) => Promise<string>;
-  generateLook: (id: string, instructions?: string) => Promise<void>;
+  saveLook: (title: string, selections: LookSelection[], pieces: string[], backgroundBlur?: boolean) => Promise<string>;
+  generateLook: (id: string, instructions?: string, backgroundBlur?: boolean) => Promise<void>;
+  updateLookBackgroundBlur: (id: string, backgroundBlur: boolean) => Promise<void>;
   updateLookTitle: (id: string, title: string) => Promise<void>;
   removeLook: (id: string) => Promise<void>;
 };
@@ -218,6 +220,7 @@ export function ClosetProvider({ children, userId }: { children: React.ReactNode
         generatedImagePath: row.generated_image_path, generatedImage: await signedImage(client, row.generated_image_path),
         generationStatus: row.generation_status || (row.generated_image_path ? 'complete' : 'idle'), generationError: row.generation_error || null,
         generationStartedAt: row.generation_started_at ? new Date(row.generation_started_at).getTime() : null,
+        backgroundBlur: row.background_blur === true,
         pieces: cleanPieces(row.pieces), savedAt: new Date(row.saved_at).getTime(),
       }))),
       client.storage.from(IMAGE_BUCKET).list(`${userId}/main`, { sortBy: { column: 'created_at', order: 'desc' }, limit: 100 }),
@@ -385,7 +388,7 @@ export function ClosetProvider({ children, userId }: { children: React.ReactNode
       }
       setMainPhotos(remaining);
     },
-    saveLook: async (title, selections, pieces) => {
+    saveLook: async (title, selections, pieces, backgroundBlur = false) => {
       if (!bodyPhotoPath) throw new Error('Add your photo before saving this style.');
       if (!title.trim()) throw new Error('Name your style before saving it.');
       if (!selections.length) throw new Error('Choose at least one piece from your wardrobe.');
@@ -409,26 +412,33 @@ export function ClosetProvider({ children, userId }: { children: React.ReactNode
         data = legacy.data; error = legacy.error;
       }
       if (error) throw error;
+      const { error: blurError } = await client.from('saved_looks').update({ background_blur: backgroundBlur }).eq('id', String(data)).eq('user_id', userId);
+      if (blurError) throw blurError;
       const savedAt = Date.now();
       setSavedLooks((current) => [{
         id: String(data), title: title.trim(), signature, imagePath: bodyPhotoPath, image: bodyPhoto,
-        generatedImagePath: null, generatedImage: null, generationStatus: 'idle', generationError: null, generationStartedAt: null, pieces, selections: selectedItems, savedAt,
+        generatedImagePath: null, generatedImage: null, generationStatus: 'idle', generationError: null, generationStartedAt: null, backgroundBlur, pieces, selections: selectedItems, savedAt,
       }, ...current]);
       return String(data);
     },
-    generateLook: async (id, instructions = '') => {
+    generateLook: async (id, instructions = '', backgroundBlur = false) => {
       const token = await getTokenRef.current();
       if (!token) throw new Error('Sign in to generate a look.');
       const { data, error } = await client.functions.invoke('generate-styleout-look', {
-        body: { lookId: id, instructions: instructions.trim() }, headers: { Authorization: `Bearer ${token}` },
+        body: { lookId: id, instructions: instructions.trim(), backgroundBlur }, headers: { Authorization: `Bearer ${token}` },
       });
       if (error) {
         const response = 'context' in error ? error.context : null;
         const detail = response instanceof Response ? await response.json().catch(() => null) : null;
         throw new Error(detail?.error || 'Could not start image generation. Please try again.');
       }
-      if (data?.status === 'running') setSavedLooks((current) => current.map((look) => look.id === id ? { ...look, generationStatus: 'running', generationError: null, generationStartedAt: Date.now() } : look));
+      if (data?.status === 'running') setSavedLooks((current) => current.map((look) => look.id === id ? { ...look, generationStatus: 'running', generationError: null, generationStartedAt: Date.now(), backgroundBlur } : look));
       else await refresh();
+    },
+    updateLookBackgroundBlur: async (id, backgroundBlur) => {
+      const { error } = await client.from('saved_looks').update({ background_blur: backgroundBlur }).eq('id', id).eq('user_id', userId);
+      if (error) throw error;
+      setSavedLooks((current) => current.map((look) => look.id === id ? { ...look, backgroundBlur } : look));
     },
     updateLookTitle: async (id, title) => {
       const cleanTitle = title.trim();

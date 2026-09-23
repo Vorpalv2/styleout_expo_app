@@ -56,7 +56,7 @@ export default function ProfileScreen() {
   async function retrySavedLook() {
     if (!openLook || startingGeneration) return;
     setStartingGeneration(true);
-    try { await generateLook(openLook.id); }
+    try { await generateLook(openLook.id, '', openLook.backgroundBlur); }
     catch (error) { Alert.alert('Generation failed', error instanceof Error ? error.message : 'Please try again.'); }
     finally { setStartingGeneration(false); }
   }
@@ -105,8 +105,8 @@ export default function ProfileScreen() {
           <Pressable onPress={saveProfile} style={s.saveButton}><Text style={s.saveText}>Save profile</Text></Pressable>
         </ScrollView></KeyboardAvoidingView>
       </Modal>
-      <Modal visible={!!selectedLook} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setSelectedLook(null)}>
-        <View style={s.lookScreen}><ScrollView contentContainerStyle={s.lookContent}>
+      <Modal visible={!!selectedLook} animationType="slide" presentationStyle="fullScreen" onRequestClose={() => imageFullscreen ? setImageFullscreen(false) : setSelectedLook(null)}>
+        <View style={s.lookScreen}><StatusBar hidden={imageFullscreen} barStyle={imageFullscreen ? 'light-content' : 'dark-content'} backgroundColor={imageFullscreen ? '#111' : '#fff'} /><ScrollView contentContainerStyle={s.lookContent}>
           <View style={s.lookHead}><View style={{ flex: 1 }}><SmallCaps>SAVED STYLE</SmallCaps><Text style={s.lookHeading}>{openLook?.title || 'Saved style'}</Text></View><View style={s.lookHeadActions}><Pressable onPress={downloadLookImage} disabled={!fullscreenImage} style={[s.downloadButton, !fullscreenImage && s.downloadDisabled]} accessibilityRole="button" accessibilityLabel="Download saved style image"><Text style={s.downloadText}>↓</Text></Pressable><Pressable onPress={() => setSelectedLook(null)} accessibilityLabel="Close saved style"><Text style={s.close}>×</Text></Pressable></View></View>
           {openLook ? <>
             {fullscreenImage ? <Pressable onPress={() => setImageFullscreen(true)} accessibilityRole="button" accessibilityLabel="View saved style image full screen"><LoadingImage source={{ uri: fullscreenImage }} style={s.lookPhoto} resizeMode="contain" /></Pressable> : <LoadingImage source={lookImage} style={s.lookPhoto} resizeMode="contain" />}
@@ -123,14 +123,12 @@ export default function ProfileScreen() {
             {!openLook.generatedImage && openLook.selections.length > 0 && openLook.selections.length <= 2 && (openLook.generationStatus !== 'running' || !!openLook.generationStartedAt && Date.now() - openLook.generationStartedAt >= 150000) ? <Pressable onPress={retrySavedLook} disabled={startingGeneration} style={s.saveButton}><Text style={s.saveText}>{startingGeneration ? 'Starting generation…' : '✦  Generate AI look'}</Text></Pressable> : null}
             <Pressable onPress={deleteSavedLook} style={s.lookRemove}><Text style={s.lookRemoveText}>Remove saved style</Text></Pressable>
           </> : null}
-        </ScrollView></View>
-      </Modal>
-      <Modal visible={imageFullscreen && !!fullscreenImage} animationType="fade" presentationStyle="fullScreen" statusBarTranslucent onRequestClose={() => setImageFullscreen(false)}>
-        <View style={s.fullscreenViewer}>
-          <StatusBar barStyle="light-content" backgroundColor="#111" />
-          {fullscreenImage ? <LoadingImage source={{ uri: fullscreenImage }} style={s.fullscreenImage} resizeMode="contain" /> : null}
-          <Pressable onPress={downloadLookImage} accessibilityRole="button" accessibilityLabel="Download saved style image" style={[s.fullscreenDownload, { top: insets.top + 12 }]}><Text style={s.fullscreenDownloadText}>↓</Text></Pressable>
-          <Pressable onPress={() => setImageFullscreen(false)} accessibilityRole="button" accessibilityLabel="Close full-screen image" style={[s.fullscreenClose, { top: insets.top + 12 }]}><Text style={s.fullscreenCloseText}>×</Text></Pressable>
+        </ScrollView>
+        {imageFullscreen && fullscreenImage ? <View style={s.fullscreenViewer}>
+          <LoadingImage source={{ uri: fullscreenImage }} style={s.fullscreenImage} resizeMode="contain" />
+          <Pressable onPress={downloadLookImage} accessibilityRole="button" accessibilityLabel="Download saved style image" style={[s.fullscreenDownload, { top: insets.top + 12 }]}><Text style={s.fullscreenDownloadText}>↓</Text><Text style={s.fullscreenDownloadLabel}>Download</Text></Pressable>
+          <Pressable onPress={() => setImageFullscreen(false)} accessibilityRole="button" accessibilityLabel="Back to saved style" style={[s.fullscreenBack, { top: insets.top + 12 }]}><Text style={s.fullscreenBackText}>‹</Text><Text style={s.fullscreenBackLabel}>Back</Text></Pressable>
+        </View> : null}
         </View>
       </Modal>
       <PicChangeCarousel visible={photoPickerOpen} onClose={() => setPhotoPickerOpen(false)} />
@@ -152,7 +150,7 @@ const s = StyleSheet.create({
   savedSection: { paddingHorizontal: 24, paddingTop: 30 }, savedSectionHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 2 }, viewAll: { color: palette.olive, fontSize: 11, fontWeight: '700' }, savedRow: { flexDirection: 'row', alignItems: 'center', gap: 13, borderBottomWidth: 1, borderBottomColor: palette.line, paddingVertical: 12 }, savedImage: { width: 58, height: 67, borderRadius: 10, backgroundColor: palette.canvas }, savedTitle: { fontSize: 15, fontWeight: '600', color: palette.ink }, savedMeta: { fontSize: 11, color: palette.muted, marginTop: 5 }, savedHeart: { color: palette.ink, fontSize: 17 },
   lookScreen: { flex: 1, backgroundColor: '#fff' }, lookContent: { padding: 24, paddingTop: 42, paddingBottom: 48 }, lookHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 22 }, lookHeadActions: { flexDirection: 'row', alignItems: 'center', gap: 10 }, downloadButton: { width: 38, height: 38, borderRadius: 19, backgroundColor: palette.canvas, alignItems: 'center', justifyContent: 'center' }, downloadDisabled: { opacity: 0.4 }, downloadText: { fontSize: 22, color: palette.ink, lineHeight: 24 },
   lookHeading: { fontSize: 27, fontWeight: '600', letterSpacing: -0.7, color: palette.ink, marginTop: 6 }, lookPhoto: { width: '100%', height: 350, borderRadius: 20, backgroundColor: palette.canvas, marginBottom: 20 },
-  fullscreenViewer: { flex: 1, backgroundColor: '#111' }, fullscreenImage: { width: '100%', height: '100%' }, fullscreenDownload: { position: 'absolute', right: 76, width: 44, height: 44, borderRadius: 22, backgroundColor: 'rgba(255,255,255,0.18)', alignItems: 'center', justifyContent: 'center' }, fullscreenDownloadText: { color: '#fff', fontSize: 25, lineHeight: 28 }, fullscreenClose: { position: 'absolute', right: 20, width: 44, height: 44, borderRadius: 22, backgroundColor: 'rgba(255,255,255,0.18)', alignItems: 'center', justifyContent: 'center' }, fullscreenCloseText: { color: '#fff', fontSize: 30, lineHeight: 34 },
+  fullscreenViewer: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, zIndex: 10, elevation: 10, backgroundColor: '#111' }, fullscreenImage: { width: '100%', height: '100%' }, fullscreenDownload: { position: 'absolute', right: 20, minWidth: 118, height: 44, paddingHorizontal: 13, borderRadius: 22, borderWidth: 1, borderColor: '#E5E5E0', backgroundColor: 'rgba(255,255,255,0.94)', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7 }, fullscreenDownloadText: { color: palette.ink, fontSize: 22, lineHeight: 26 }, fullscreenDownloadLabel: { color: palette.ink, fontSize: 13, fontWeight: '600' }, fullscreenBack: { position: 'absolute', left: 20, minWidth: 88, height: 44, paddingHorizontal: 11, borderRadius: 22, borderWidth: 1, borderColor: '#E5E5E0', backgroundColor: 'rgba(255,255,255,0.94)', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4 }, fullscreenBackText: { color: palette.ink, fontSize: 34, lineHeight: 38, marginTop: -3 }, fullscreenBackLabel: { color: palette.ink, fontSize: 13, fontWeight: '600' },
   lookDate: { fontSize: 12, color: palette.muted, marginTop: 8 }, lookDivider: { height: 1, backgroundColor: palette.line, marginVertical: 24 },
   lookPiece: { flexDirection: 'row', alignItems: 'center', gap: 13, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: palette.line }, lookPieceImage: { width: 64, height: 64, borderRadius: 12, backgroundColor: palette.canvas },
   lookPieceName: { fontSize: 15, fontWeight: '600', color: palette.ink }, lookPieceMeta: { fontSize: 11, color: palette.muted, marginTop: 5 }, lookLegacy: { color: palette.muted, fontSize: 13, lineHeight: 20, marginTop: 16 },

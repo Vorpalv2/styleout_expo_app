@@ -22,8 +22,11 @@ async function downloadImage(admin, path) {
   return { data, type };
 }
 
-function promptFor(items, additionalInstructions) {
+function promptFor(items, additionalInstructions, backgroundBlur) {
   const list = items.map((item, index) => `${index + 2}. ${item.item_category}: ${item.item_name.slice(0, 80)}`).join('\n');
+  const backgroundRequest = backgroundBlur
+    ? '\n\nBACKGROUND BLUR: Apply a subtle, natural depth-of-field blur only to the existing scene behind the person. Keep the person, selected outfit and every visible body part crisp and unchanged. Preserve the same background objects, colors, lighting and composition; soften their focus without replacing or removing them.'
+    : '';
   const userRequest = additionalInstructions
     ? `\n\nADDITIONAL USER STYLING REQUEST:\n${additionalInstructions}\nApply this request only where it is compatible with the identity lock, body lock and edit boundary above. It may guide garment fit, styling, layering or accessory placement, but it must never alter the person's identity, face, skin, body, pose or other protected details.`
     : '';
@@ -39,17 +42,18 @@ IDENTITY LOCK — preserve exactly from Image 1:
 BODY LOCK — preserve exactly from Image 1:
 - height, build, weight, body proportions, shoulders, waist, hips and limb shape
 - pose, posture, hands, fingers, feet and all visible body parts
-- camera position, crop, perspective, lighting, shadows and background
+- camera position, crop, perspective, lighting and shadows
+- the existing background scene, composition, colors and contents ${backgroundBlur ? 'must remain recognizable and in the same layout; apply only the specific subtle focus blur requested below' : 'must remain unchanged'}
 
 Images 2 onward are garment references only. Ignore and never copy any person, face, skin, body, pose, mannequin, hanger, room or background visible in those references. Extract only the named garment or accessory from each reference:
 ${list}
 
-EDIT BOUNDARY: change only the pixels necessary to dress the person in the selected pieces and create physically plausible garment folds, fit, occlusion and contact shadows. Adapt each garment to the person's existing body and pose; never adapt the person's face or body to the garment. Preserve the exact colors, patterns, cut, material and recognizable details of every selected piece. Keep all unselected clothing and accessories unchanged.
+EDIT BOUNDARY: change only the pixels necessary to dress the person in the selected pieces and create physically plausible garment folds, fit, occlusion and contact shadows${backgroundBlur ? ', plus pixels needed for the requested background-only blur' : ''}. Adapt each garment to the person's existing body and pose; never adapt the person's face or body to the garment. Preserve the exact colors, patterns, cut, material and recognizable details of every selected piece. Keep all unselected clothing and accessories unchanged.
 
-Do not add garments, accessories, jewelry, tattoos, makeup, hair, body parts or people. Do not alter exposed skin. Do not create text, labels, prices, a collage or a product catalog.${userRequest}\n\nOutput one vertical full-length photo. Before output, verify that the face, identity, skin and body match Image 1 and that only the requested wardrobe pieces changed.`;
+Do not add garments, accessories, jewelry, tattoos, makeup, hair, body parts or people. Do not alter exposed skin. Do not create text, labels, prices, a collage or a product catalog.${backgroundRequest}${userRequest}\n\nOutput one vertical full-length photo. Before output, verify that the face, identity, skin and body match Image 1 and that only the requested wardrobe pieces changed.`;
 }
 
-async function runGeneration(admin, look, items, key, additionalInstructions) {
+async function runGeneration(admin, look, items, key, additionalInstructions, backgroundBlur) {
   try {
     const paths = [look.image_path, ...items.map((item) => item.item_image_path)];
     const images = await Promise.all(paths.map((path) => downloadImage(admin, path)));
@@ -62,7 +66,7 @@ async function runGeneration(admin, look, items, key, additionalInstructions) {
       result = await generateImage({
         model: gateway.imageModel(model),
         prompt: {
-          text: promptFor(items, additionalInstructions),
+          text: promptFor(items, additionalInstructions, backgroundBlur),
           images: await Promise.all(images.map(async ({ data }) => new Uint8Array(await data.arrayBuffer()))),
         },
         aspectRatio: '2:3',
@@ -111,7 +115,8 @@ Deno.serve(async (request) => {
   if (request.method !== 'POST') return reply(405, { error: 'POST required.' });
   const authorization = request.headers.get('Authorization');
   if (!authorization?.startsWith('Bearer ')) return reply(401, { error: 'Sign in to generate a look.' });
-  const { lookId, instructions } = await request.json().catch(() => ({}));
+  const { lookId, instructions, backgroundBlur: requestedBackgroundBlur } = await request.json().catch(() => ({}));
+  const backgroundBlur = requestedBackgroundBlur === true;
   const additionalInstructions = typeof instructions === 'string'
     ? instructions.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '').trim().slice(0, 800)
     : '';
@@ -140,12 +145,12 @@ Deno.serve(async (request) => {
   const stale = look.generation_started_at && Date.now() - new Date(look.generation_started_at).getTime() > 150000;
   if (look.generation_status === 'running' && !stale) return reply(202, { status: 'running' });
   const admin = createClient(url, service, { auth: { persistSession: false } });
-  let claim = admin.from('saved_looks').update({ generation_status: 'running', generation_started_at: new Date().toISOString(), generation_error: null })
+  let claim = admin.from('saved_looks').update({ generation_status: 'running', generation_started_at: new Date().toISOString(), generation_error: null, background_blur: backgroundBlur })
     .eq('id', lookId).eq('user_id', look.user_id).is('generated_image_path', null);
   claim = stale ? claim.lt('generation_started_at', new Date(Date.now() - 150000).toISOString()) : claim.in('generation_status', ['idle', 'failed']);
   const { data: claimed, error: claimError } = await claim.select('id').maybeSingle();
   if (claimError) return reply(500, { error: 'Could not start image generation.' });
   if (!claimed) return reply(202, { status: 'running' });
-  EdgeRuntime.waitUntil(runGeneration(admin, look, items, key, additionalInstructions));
+  EdgeRuntime.waitUntil(runGeneration(admin, look, items, key, additionalInstructions, backgroundBlur));
   return reply(202, { status: 'running' });
 });
