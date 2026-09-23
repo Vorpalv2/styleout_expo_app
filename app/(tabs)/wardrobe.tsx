@@ -3,6 +3,7 @@ import { useRouter, type Href } from 'expo-router';
 import { Alert, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { AppHeader, palette, RoundAction, SamplePieceImage, samplePieces, SmallCaps } from '@/components/StyleoutUI';
 import { LoadingImage } from '@/components/LoadingImage';
+import { ClosetRefreshControl } from '@/components/ClosetRefreshControl';
 import { CATEGORIES, Category, ClosetItem, pickPhoto, useCloset } from '@/lib/closet';
 
 export default function WardrobeScreen() {
@@ -81,7 +82,7 @@ export default function WardrobeScreen() {
 
   return (
     <View style={s.screen}>
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 32 }}>
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 32 }} alwaysBounceVertical refreshControl={Platform.OS === 'web' ? undefined : <ClosetRefreshControl />}>
         <AppHeader eyebrow="THE PIECES YOU OWN" title="Wardrobe" right={<RoundAction label="Add clothing item" onPress={startAdd}><Text style={s.plus}>＋</Text></RoundAction>} />
         <View style={s.intro}><Text style={s.introText}>Every good look starts here.</Text><Text style={s.count}>{items.length} {items.length === 1 ? 'PIECE' : 'PIECES'}</Text></View>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.filters}>

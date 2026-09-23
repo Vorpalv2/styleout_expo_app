@@ -5,6 +5,7 @@ import { Alert, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, St
 import { AppHeader, palette, RoundAction, samplePieces, SmallCaps } from '@/components/StyleoutUI';
 import { LoadingImage } from '@/components/LoadingImage';
 import { PicChangeCarousel } from '@/components/PicChangeCarousel';
+import { ClosetRefreshControl } from '@/components/ClosetRefreshControl';
 import { ClosetItem, lookSignature, takePhoto, useCloset } from '@/lib/closet';
 
 const lookImage = require('../../assets/styleout/look.png');
@@ -43,6 +44,8 @@ export default function StyleScreen() {
   const selections = Object.entries(chosen).map(([slotIndex, item]) => ({ slotIndex: Number(slotIndex), itemId: item.id }));
   const savedLook = savedLooks.find((look) => look.signature === lookSignature(bodyPhotoPath, selections));
   const generating = savedLook?.generationStatus === 'running' && (!savedLook.generationStartedAt || Date.now() - savedLook.generationStartedAt < 150000);
+  const generateLabel = savedLook?.generatedImage ? 'View look' : generating ? 'Generating' : saving ? 'Starting' : savedLook?.generationStatus === 'failed' || savedLook?.generationStatus === 'running' ? 'Retry' : 'Generate';
+  const saveLabel = saving ? 'Saving' : savedLook && styleName.trim() !== savedLook.title ? 'Update' : savedLook ? 'Saved looks' : 'Save look';
   useEffect(() => { if (savedLook) setStyleName(savedLook.title); }, [savedLook?.id]);
   useEffect(() => {
     if (!pendingStyleSelection) return;
@@ -101,7 +104,7 @@ export default function StyleScreen() {
 
   return (
     <View style={s.screen}>
-      <ScrollView contentContainerStyle={{ paddingBottom: 25 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ paddingBottom: 25 }} showsVerticalScrollIndicator={false} alwaysBounceVertical refreshControl={Platform.OS === 'web' ? undefined : <ClosetRefreshControl />}>
         <AppHeader eyebrow="YOUR DIGITAL DRESSING ROOM" title="Styleout" right={<RoundAction label="Sign out" onPress={leaveAccount}><LogoutIcon /></RoundAction>} />
         <View style={s.titleRow}>
           <View style={s.titleInputWrap}><SmallCaps>YOUR STYLE NAME</SmallCaps><TextInput value={styleName} onChangeText={setStyleName} placeholder="Name this style" placeholderTextColor={palette.muted} style={s.lookTitle} maxLength={60} accessibilityLabel="Style name" /></View>
@@ -109,25 +112,45 @@ export default function StyleScreen() {
         </View>
         <View style={[s.stage, { height: stageHeight }]}>
           <LoadingImage source={savedLook?.generatedImage ? { uri: savedLook.generatedImage } : bodyPhoto ? { uri: bodyPhoto } : lookImage} resizeMode="contain" style={s.model} />
-          <View style={s.stageLabel}><Text style={s.stageLabelText}>{savedLook?.generatedImage ? 'YOUR AI LOOK' : bodyPhoto ? 'YOUR PHOTO' : 'THE EDIT'}</Text></View>
           {samplePieces.map((item, i) => {
             const selected = items.find((entry) => entry.id === chosen[i]?.id);
             return (
-              <Pressable key={item.name} accessibilityLabel={`Choose ${selected?.name || item.category} from wardrobe`} onPress={() => { setActive(i); setSwapOpen(true); }}
-                style={[s.piece, { top: stageHeight * (0.11 + (i % 3) * 0.30), [i < 3 ? 'left' : 'right']: 12 }, active === i && s.pieceActive]}>
-                {selected ? <LoadingImage source={{ uri: selected.image }} style={s.pieceImage} /> : <EmptyPiece label={item.category} />}
-              </Pressable>
+              <View key={item.name} style={[s.piecePosition, { top: stageHeight * (0.11 + (i % 3) * 0.30), [i < 3 ? 'left' : 'right']: 12 }]}>
+                <Pressable accessibilityLabel={`Choose ${selected?.name || item.category} from wardrobe`} onPress={() => { setActive(i); setSwapOpen(true); }}
+                  style={[s.piece, active === i && s.pieceActive]}>
+                  {selected ? <LoadingImage source={{ uri: selected.image }} style={s.pieceImage} /> : <EmptyPiece label={item.category} />}
+                </Pressable>
+                {selected ? <Pressable accessibilityRole="button" accessibilityLabel={`Remove ${selected.name} from style`} hitSlop={8} onPress={() => {
+                  setChosen((current) => {
+                    const next = { ...current };
+                    delete next[i];
+                    return next;
+                  });
+                }} style={s.removePiece}>
+                  <Text style={s.removePieceText}>×</Text>
+                </Pressable> : null}
+              </View>
             );
           })}
           <Pressable onPress={changePhoto} style={s.changePhoto}><Text style={s.changePhotoText}>↗  Change photo</Text></Pressable>
         </View>
         <View style={s.details}>
-          <Pressable onPress={savedLook?.generatedImage ? () => router.push('/profile' as Href) : generateStyle} disabled={saving || generating} style={[s.generateButton, (saving || generating) && s.generateDisabled]}><Text style={s.generateText}>{savedLook?.generatedImage ? '✦  View AI look in Saved Looks ↗' : generating ? '✦  Generating AI look…' : saving ? '✦  Starting generation…' : savedLook?.generationStatus === 'failed' || savedLook?.generationStatus === 'running' ? '✦  Retry AI look' : '✦  Generate AI look'}</Text></Pressable>
-          {!savedLook?.generatedImage ? <Pressable onPress={() => { setInstructionDraft(generationInstructions); setInstructionOpen(true); }} style={[s.instructionButton, generationInstructions.trim() && s.instructionButtonActive]} accessibilityLabel="Add instructions for AI look generation">
-            <View style={s.instructionCopy}><Text style={s.instructionIcon}>✎</Text><View><Text style={s.instructionTitle}>Generation instructions</Text><Text style={s.instructionHint}>{generationInstructions.trim() ? 'Custom guidance added' : 'Optional details for this look'}</Text></View></View>
-            <Text style={s.instructionArrow}>{generationInstructions.trim() ? 'EDIT' : '↗'}</Text>
-          </Pressable> : null}
-          <Pressable onPress={saveStyle} disabled={saving} style={s.saveStyleButton}><Text style={s.saveStyleText}>{saving ? 'Saving…' : savedLook && styleName.trim() !== savedLook.title ? 'Update style name' : savedLook ? 'View saved style ↗' : '♡  Save this style'}</Text></Pressable>
+          <View style={s.actionDock}>
+            <Pressable accessibilityLabel="Add instructions for AI look generation" onPress={() => { setInstructionDraft(generationInstructions); setInstructionOpen(true); }} style={({ pressed }) => [s.actionItem, pressed && s.actionPressed]}>
+              <View><Text style={[s.actionIcon, generationInstructions.trim() && s.actionActive]}>✎</Text>{generationInstructions.trim() ? <View style={s.actionDot} /> : null}</View>
+              <Text style={[s.actionLabel, generationInstructions.trim() && s.actionActive]}>Instructions</Text>
+            </Pressable>
+            <View style={s.actionDivider} />
+            <Pressable accessibilityLabel={savedLook?.generatedImage ? 'View AI look in saved looks' : `${generateLabel} AI look`} onPress={savedLook?.generatedImage ? () => router.push('/profile' as Href) : generateStyle} disabled={saving || generating} style={({ pressed }) => [s.actionItem, s.actionPrimary, pressed && s.actionPressed, (saving || generating) && s.actionDisabled]}>
+              <Text style={[s.actionIcon, s.actionPrimaryIcon]}>✦</Text>
+              <Text style={[s.actionLabel, s.actionPrimaryLabel]}>{generateLabel}</Text>
+            </Pressable>
+            <View style={s.actionDivider} />
+            <Pressable accessibilityLabel={savedLook ? saveLabel : 'Save this style'} onPress={saveStyle} disabled={saving} style={({ pressed }) => [s.actionItem, pressed && s.actionPressed, saving && s.actionDisabled]}>
+              <Text style={s.actionIcon}>{savedLook ? '✓' : '♡'}</Text>
+              <Text style={s.actionLabel}>{saveLabel}</Text>
+            </Pressable>
+          </View>
           <Text style={s.helpText}>{savedLook?.generationStatus === 'failed' ? savedLook.generationError || 'Image generation failed. You can retry.' : savedLook?.generationStatus === 'running' && !generating ? 'Generation took too long. Tap Retry AI look.' : saveMessage || (!bodyPhotoPath ? 'Add your photo, then choose wardrobe pieces to save a style.' : !selections.length ? 'Swap in at least one piece from your wardrobe to save this style.' : selections.length > 2 ? 'This AI model can use up to two wardrobe pieces with your photo. You can still save this style.' : `${selections.length} ${selections.length === 1 ? 'piece' : 'pieces'} selected from your wardrobe. AI generation uses these photos and saves the result with this style.`)}</Text>
         </View>
       </ScrollView>
@@ -173,23 +196,24 @@ const s = StyleSheet.create({
   titleRow: { paddingHorizontal: 24, paddingTop: 8, paddingBottom: 18, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end' },
   titleInputWrap: { flex: 1, marginRight: 12 }, lookTitle: { fontSize: 23, fontWeight: '500', color: palette.ink, marginTop: 5, letterSpacing: -0.6, minWidth: 160, paddingVertical: 0 }, link: { fontSize: 12, fontWeight: '600', color: palette.olive, paddingVertical: 8 },
   stage: { marginHorizontal: 13, borderRadius: 28, backgroundColor: '#F7F7F5', overflow: 'hidden' }, model: { width: '100%', height: '100%' },
-  stageLabel: { position: 'absolute', top: 14, alignSelf: 'center', backgroundColor: '#FFFFFFDD', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20 },
-  stageLabelText: { fontSize: 9, fontWeight: '700', letterSpacing: 1.7, color: palette.muted },
-  piece: { position: 'absolute', width: 64, height: 86, borderRadius: 15, backgroundColor: '#fff', alignItems: 'center', justifyContent: 'flex-start', paddingTop: 4, borderWidth: 1.5, borderColor: '#fff' },
+  piecePosition: { position: 'absolute', width: 64, height: 86 },
+  piece: { width: '100%', height: '100%', borderRadius: 15, backgroundColor: '#fff', alignItems: 'center', justifyContent: 'flex-start', paddingTop: 4, borderWidth: 1.5, borderColor: '#fff' },
   pieceActive: { borderColor: palette.ink }, pieceImage: { width: 55, height: 55, borderRadius: 10 },
+  removePiece: { position: 'absolute', top: -7, right: -7, width: 23, height: 23, borderRadius: 12, backgroundColor: palette.ink, borderWidth: 2, borderColor: palette.paper, alignItems: 'center', justifyContent: 'center', zIndex: 2 },
+  removePieceText: { color: '#fff', fontSize: 17, fontWeight: '600', lineHeight: 19, marginTop: -1 },
   emptyWrap: { alignItems: 'center' }, emptyPieceLabel: { color: palette.muted, fontSize: 8, fontWeight: '700', letterSpacing: 0.5, marginTop: 4, textTransform: 'uppercase' },
   emptyPiece: { width: 55, height: 55, borderRadius: 10, borderWidth: 1, borderStyle: 'dashed', borderColor: '#C9CBC3', backgroundColor: '#F7F8F4', alignItems: 'center', justifyContent: 'center' },
   emptyPieceLarge: { width: 74, height: 74 }, emptyPieceIcon: { fontSize: 18, color: palette.muted, lineHeight: 22 }, emptyPieceIconLarge: { fontSize: 23 },
   emptyPieceText: { fontSize: 7, fontWeight: '700', letterSpacing: 0.3, color: palette.muted, textAlign: 'center' }, emptyPieceTextLarge: { fontSize: 7 },
   changePhoto: { position: 'absolute', bottom: 14, right: 14, backgroundColor: '#fff', paddingHorizontal: 11, paddingVertical: 8, borderRadius: 12 }, changePhotoText: { fontSize: 11, fontWeight: '600', color: palette.ink },
-  details: { marginHorizontal: 24, paddingTop: 20 },
-  generateButton: { backgroundColor: palette.olive, borderRadius: 16, height: 52, alignItems: 'center', justifyContent: 'center', marginTop: 10 },
-  generateDisabled: { opacity: 0.55 }, generateText: { color: '#fff', fontSize: 13, fontWeight: '700' },
-  instructionButton: { borderWidth: 1, borderColor: palette.line, borderRadius: 16, minHeight: 58, paddingHorizontal: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 10, backgroundColor: '#fff' },
-  instructionButtonActive: { borderColor: palette.olive, backgroundColor: '#F7F8F4' }, instructionCopy: { flexDirection: 'row', alignItems: 'center', gap: 12 }, instructionIcon: { fontSize: 20, color: palette.ink },
-  instructionTitle: { color: palette.ink, fontSize: 13, fontWeight: '700' }, instructionHint: { color: palette.muted, fontSize: 10, marginTop: 3 }, instructionArrow: { color: palette.olive, fontSize: 10, fontWeight: '800', letterSpacing: 1 },
-  saveStyleButton: { borderColor: palette.ink, borderWidth: 1, borderRadius: 16, height: 50, alignItems: 'center', justifyContent: 'center', marginTop: 10 },
-  saveStyleText: { color: palette.ink, fontSize: 13, fontWeight: '600' },
+  details: { marginHorizontal: 24, paddingTop: 8 },
+  actionDock: { minHeight: 78, flexDirection: 'row', alignItems: 'stretch', borderWidth: 1, borderColor: palette.line, borderRadius: 19, overflow: 'hidden', backgroundColor: '#fff' },
+  actionItem: { flex: 1, minWidth: 0, alignItems: 'center', justifyContent: 'center', gap: 6, paddingHorizontal: 5, paddingVertical: 12 },
+  actionPrimary: { backgroundColor: '#F3F5EE' }, actionPressed: { opacity: 0.68 }, actionDisabled: { opacity: 0.45 },
+  actionDivider: { width: 1, height: 42, alignSelf: 'center', backgroundColor: palette.line },
+  actionIcon: { color: palette.ink, fontSize: 21, lineHeight: 23, fontWeight: '500' }, actionPrimaryIcon: { color: palette.olive },
+  actionLabel: { color: palette.ink, fontSize: 10, lineHeight: 13, fontWeight: '700', letterSpacing: 0.15, textAlign: 'center' }, actionPrimaryLabel: { color: palette.olive }, actionActive: { color: palette.olive },
+  actionDot: { position: 'absolute', right: -5, top: -1, width: 5, height: 5, borderRadius: 3, backgroundColor: palette.olive },
   helpText: { textAlign: 'center', color: palette.muted, fontSize: 11, marginTop: 13 },
   backdrop: { flex: 1, justifyContent: 'flex-end', backgroundColor: '#0006' }, modal: { backgroundColor: '#fff', borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 24, paddingBottom: 38 },
   handle: { alignSelf: 'center', width: 34, height: 4, borderRadius: 3, backgroundColor: '#D9D9D5', marginBottom: 22 },

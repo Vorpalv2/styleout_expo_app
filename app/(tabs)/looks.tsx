@@ -1,8 +1,9 @@
 import { useRouter } from 'expo-router';
 import { useMemo, useState } from 'react';
-import { Alert, Modal, Pressable, ScrollView, StatusBar, StyleSheet, Text, View } from 'react-native';
+import { Alert, Modal, Platform, Pressable, ScrollView, StatusBar, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LoadingImage } from '@/components/LoadingImage';
+import { ClosetRefreshControl } from '@/components/ClosetRefreshControl';
 import { palette, SmallCaps } from '@/components/StyleoutUI';
 import { SavedLook, useCloset } from '@/lib/closet';
 import { downloadImage } from '@/lib/saveImage';
@@ -40,7 +41,7 @@ export default function LooksScreen() {
   }
 
   return <View style={s.screen}>
-    <ScrollView contentContainerStyle={s.content} showsVerticalScrollIndicator={false}>
+    <ScrollView contentContainerStyle={s.content} showsVerticalScrollIndicator={false} alwaysBounceVertical refreshControl={Platform.OS === 'web' ? undefined : <ClosetRefreshControl />}>
       <View style={s.header}><Pressable onPress={() => router.back()} accessibilityLabel="Back to profile" style={s.back}><Text style={s.backText}>‹</Text></Pressable><View style={s.heading}><SmallCaps>YOUR STYLE ARCHIVE</SmallCaps><Text style={s.title}>All saved looks</Text></View><Text style={s.count}>{savedLooks.length.toString().padStart(2, '0')}</Text></View>
       <View style={s.toolbar}><Text style={s.resultText}>{sortedLooks.length} {sortedLooks.length === 1 ? 'look' : 'looks'}</Text><View><Pressable onPress={() => setFilterOpen((open) => !open)} accessibilityRole="button" accessibilityLabel={`Sort saved looks, ${sortLabel}`} style={s.filterButton}><Text style={s.filterButtonText}>{sortLabel}</Text><Text style={s.chevron}>{filterOpen ? '⌃' : '⌄'}</Text></Pressable>{filterOpen ? <View style={s.filterMenu}><Text style={s.menuLabel}>SORT BY</Text>{SORTS.map((entry) => <Pressable key={entry.key} onPress={() => { setSort(entry.key); setFilterOpen(false); }} style={[s.filterOption, sort === entry.key && s.filterOptionActive]}><Text style={[s.filterOptionText, sort === entry.key && s.filterOptionTextActive]}>{entry.label}</Text>{sort === entry.key ? <Text style={s.check}>✓</Text> : null}</Pressable>)}</View> : null}</View></View>
       {sortedLooks.length ? <View style={s.grid}>{sortedLooks.map((look, index) => <Pressable key={look.id} onPress={() => setPreview(look)} style={s.card} accessibilityLabel={`Open ${look.title}`}><View style={s.imageWrap}><LoadingImage source={look.generatedImage ? { uri: look.generatedImage } : look.image ? { uri: look.image } : lookImage} style={s.image} resizeMode="cover" /><View style={s.numberBadge}><Text style={s.numberText}>{String(index + 1).padStart(2, '0')}</Text></View></View><Text style={s.cardTitle} numberOfLines={1}>{look.title}</Text><Text style={s.cardMeta}>{look.generatedImage ? 'AI LOOK' : look.generationStatus === 'running' ? 'GENERATING' : 'SOURCE'} · {new Date(look.savedAt).toLocaleDateString()}</Text></Pressable>)}</View> : <View style={s.empty}><Text style={s.emptyTitle}>No looks in this view</Text><Text style={s.emptyCopy}>Choose a different filter to see the rest of your saved styles.</Text></View>}

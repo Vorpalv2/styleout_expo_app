@@ -7,6 +7,7 @@ import { AppHeader, palette, RoundAction, SmallCaps } from '@/components/Styleou
 import { PicChangeCarousel } from '@/components/PicChangeCarousel';
 import { LoadingImage } from '@/components/LoadingImage';
 import { InstagramImport } from '@/components/InstagramImport';
+import { ClosetRefreshControl } from '@/components/ClosetRefreshControl';
 import { CATEGORIES, SavedLook, useCloset } from '@/lib/closet';
 import { downloadImage } from '@/lib/saveImage';
 
@@ -69,7 +70,7 @@ export default function ProfileScreen() {
 
   return (
     <View style={s.screen}>
-      <ScrollView contentContainerStyle={{ paddingBottom: 36 }}>
+      <ScrollView contentContainerStyle={{ paddingBottom: 36 }} alwaysBounceVertical refreshControl={Platform.OS === 'web' ? undefined : <ClosetRefreshControl />}>
         <AppHeader eyebrow="YOUR SPACE" title="Profile" right={<RoundAction label="Edit profile" onPress={beginEdit}><Text style={s.editIcon}>✎</Text></RoundAction>} />
         <View style={s.identity}>
           <View style={s.avatar}>{bodyPhoto ? <LoadingImage source={{ uri: bodyPhoto }} style={s.avatarImage} /> : user?.imageUrl ? <LoadingImage source={{ uri: user.imageUrl }} style={s.avatarImage} /> : <Text style={s.avatarLetter}>{displayName === 'Your profile' ? 'S' : displayName.charAt(0).toUpperCase()}</Text>}</View>
