@@ -2,6 +2,8 @@
 
 **Live preview:** [Open Styleout](https://styleout--wiyoiyn3vl.expo.app/)
 
+To show the active preview under GitHub's **Deployments** section, open **Actions → Register Expo preview deployment → Run workflow**. The current URL is prefilled. After a future `eas deploy`, rerun the workflow with the new Expo URL.
+
 An Expo 57 wardrobe and outfit styling app with Clerk authentication and Supabase storage.
 
 Most AI "try-on" apps send your photos to a third-party API directly from the client. That's a security nightmare waiting to happen.
