@@ -181,7 +181,7 @@ async function uploadImage(client: Client, userId: string, uri: string, area: 'm
 
 export function ClosetProvider({ children, userId }: { children: React.ReactNode; userId: string | null }) {
   const { colors: theme } = useStyleoutTheme();
-  const { showToast } = useToast();
+  const { showToast, showPersistentToast, clearPersistentToast } = useToast();
   const { getToken } = useAuth();
   const getTokenRef = useRef(getToken);
   getTokenRef.current = getToken;
@@ -201,8 +201,13 @@ export function ClosetProvider({ children, userId }: { children: React.ReactNode
   const [wardrobeDraft, setWardrobeDraft] = useState<WardrobeDraft | null>(null);
   const [pendingStyleSelection, setPendingStyleSelection] = useState<PendingStyleSelection | null>(null);
   const generationStatuses = useRef(new Map<string, SavedLook['generationStatus']>());
+  const pendingGenerationToasts = useRef<Array<{ message: string; tone: 'success' | 'error' }>>([]);
 
-  useEffect(() => { generationStatuses.current.clear(); }, [userId]);
+  useEffect(() => {
+    generationStatuses.current.clear();
+    pendingGenerationToasts.current = [];
+    return clearPersistentToast;
+  }, [clearPersistentToast, userId]);
 
   const refresh = useCallback(async () => {
     if (!client || !userId) return;
@@ -256,9 +261,20 @@ export function ClosetProvider({ children, userId }: { children: React.ReactNode
     const loadedLooks: SavedLook[] = rawLooks.map((look) => ({ ...look, selections: linksByLook.get(look.id) || [] }));
     for (const look of loadedLooks) {
       const previousStatus = generationStatuses.current.get(look.id);
-      if (previousStatus === 'running' && look.generationStatus === 'complete') showToast(`${look.title} is ready in Saved Looks.`);
-      else if (previousStatus === 'running' && look.generationStatus === 'failed') showToast(look.generationError || `${look.title} could not be generated.`, 'error');
+      if (previousStatus === 'running' && look.generationStatus === 'complete') {
+        pendingGenerationToasts.current.push({ message: `${look.title} is ready in Saved Looks.`, tone: 'success' });
+      } else if (previousStatus === 'running' && look.generationStatus === 'failed') {
+        pendingGenerationToasts.current.push({ message: look.generationError || `${look.title} could not be generated.`, tone: 'error' });
+      }
       generationStatuses.current.set(look.id, look.generationStatus);
+    }
+    const activeGenerations = loadedLooks.filter((look) => look.generationStatus === 'running' && (!look.generationStartedAt || Date.now() - look.generationStartedAt < 150000));
+    if (activeGenerations.length) {
+      showPersistentToast(activeGenerations.length === 1 ? 'Image generating…' : `${activeGenerations.length} images generating…`, 'info');
+    } else {
+      clearPersistentToast();
+      const finished = pendingGenerationToasts.current.splice(0);
+      if (finished.length) showToast(finished.map((entry) => entry.message).join(' '), finished.some((entry) => entry.tone === 'error') ? 'error' : 'success');
     }
     setName(profile?.display_name || 'Your profile');
     setBio(profile?.bio || 'A wardrobe that feels like you.');
@@ -270,7 +286,7 @@ export function ClosetProvider({ children, userId }: { children: React.ReactNode
     setSnapshotsAvailable(!snapshotProbe.error);
     setTitlesAvailable(!titleProbe.error);
     setLoadError(null);
-  }, [client, showToast, userId]);
+  }, [client, clearPersistentToast, showPersistentToast, showToast, userId]);
 
   useEffect(() => {
     if (!userId || !client) { setReady(true); return; }
@@ -453,7 +469,7 @@ export function ClosetProvider({ children, userId }: { children: React.ReactNode
       if (data?.status === 'running') {
         generationStatuses.current.set(id, 'running');
         setSavedLooks((current) => current.map((look) => look.id === id ? { ...look, generationStatus: 'running', generationError: null, generationStartedAt: Date.now(), backgroundBlur } : look));
-        showToast('AI look generation started.', 'info');
+        showPersistentToast('Image generating…', 'info');
       }
       else await refresh();
     },

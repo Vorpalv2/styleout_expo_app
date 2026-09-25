@@ -1,26 +1,39 @@
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ThemeColors, useStyleoutTheme } from '@/components/StyleoutTheme';
 
 type ToastTone = 'success' | 'info' | 'error';
-type ToastPayload = { id: number; message: string; tone: ToastTone };
-type ToastContextValue = { showToast: (message: string, tone?: ToastTone) => void };
+type ToastPayload = { id: number; message: string; tone: ToastTone; persistent: boolean };
+type ToastContextValue = {
+  showToast: (message: string, tone?: ToastTone) => void;
+  showPersistentToast: (message: string, tone?: ToastTone) => void;
+  clearPersistentToast: () => void;
+};
 const ToastContext = createContext<ToastContextValue | null>(null);
 
 export function ToastProvider({ children }: { children: React.ReactNode }) {
   const { colors } = useStyleoutTheme();
   const insets = useSafeAreaInsets();
   const [toast, setToast] = useState<ToastPayload | null>(null);
+  const nextToastId = useRef(0);
   const showToast = useCallback((message: string, tone: ToastTone = 'success') => {
-    setToast({ id: Date.now(), message, tone });
+    setToast({ id: ++nextToastId.current, message, tone, persistent: false });
+  }, []);
+  const showPersistentToast = useCallback((message: string, tone: ToastTone = 'info') => {
+    setToast((current) => current?.persistent && current.message === message && current.tone === tone
+      ? current
+      : { id: ++nextToastId.current, message, tone, persistent: true });
+  }, []);
+  const clearPersistentToast = useCallback(() => {
+    setToast((current) => current?.persistent ? null : current);
   }, []);
   useEffect(() => {
-    if (!toast) return;
+    if (!toast || toast.persistent) return;
     const timer = setTimeout(() => setToast((current) => current?.id === toast.id ? null : current), 3400);
     return () => clearTimeout(timer);
   }, [toast]);
-  const value = useMemo(() => ({ showToast }), [showToast]);
+  const value = useMemo(() => ({ showToast, showPersistentToast, clearPersistentToast }), [showToast, showPersistentToast, clearPersistentToast]);
   const styles = useMemo(() => makeStyles(colors), [colors]);
   return <ToastContext.Provider value={value}>
     {children}
