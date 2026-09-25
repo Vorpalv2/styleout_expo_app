@@ -45,6 +45,9 @@ Deno.serve(async (request) => {
     const clerkRecord = await clerkUser.json();
     if (clerkRecord.id !== userId) throw new Error('The signed-in account could not be verified.');
 
+    const { error: keyError } = await admin.rpc('styleout_delete_ai_gateway_key', { p_user_id: userId });
+    if (keyError) throw new Error('Could not securely remove the saved AI Gateway key. Account deletion was stopped.');
+
     const imagePaths = await listUserFiles(admin, userId);
 
     // Remove children before parents because wardrobe links restrict item deletion.

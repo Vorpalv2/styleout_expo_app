@@ -9,7 +9,7 @@ const modelImage = require('../assets/styleout/female-dress.png');
 const steps = [
   { eyebrow: 'WELCOME TO STYLEOUT', title: 'Your wardrobe, styled on you.', body: 'Start with a full-length photo. Styleout keeps your original beside every generated look, so you can compare without losing your point of view.', action: 'Show me how' },
   { eyebrow: 'YOUR WARDROBE', title: 'Build the rail you actually own.', body: 'Photograph your favorite pieces, add a few useful details, and they become ready to try in any look.', action: 'Next' },
-  { eyebrow: 'THE FITTING ROOM', title: 'Compose, direct, generate.', body: 'Choose up to two wardrobe pieces, name the style, and add a note about the fit or mood. Styleout turns that direction into a look.', action: 'Next' },
+  { eyebrow: 'THE FITTING ROOM', title: 'Compose, direct, generate.', body: 'Choose wardrobe pieces, name the style, and add a note about the fit or mood. Each image model supports a different number of references.', action: 'Next' },
   { eyebrow: 'KEEP WHAT WORKS', title: 'Compare it. Save it. Wear it.', body: 'Drag across the finished image to compare it with your original, then save the combinations worth coming back to.', action: 'Start styling' },
 ] as const;
 

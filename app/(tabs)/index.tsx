@@ -10,7 +10,7 @@ import { ClosetRefreshControl } from '@/components/ClosetRefreshControl';
 import { useToast } from '@/components/Toast';
 import { OnboardingTour } from '@/components/OnboardingTour';
 import { ClosetItem, lookSignature, takePhoto, useCloset } from '@/lib/closet';
-import { IMAGE_GENERATION_MODELS } from '@/lib/imageModels';
+import { DEFAULT_IMAGE_GENERATION_MODEL, IMAGE_GENERATION_MODELS, maxWardrobeItemsForModel } from '@/lib/imageModels';
 
 const lookImage = require('../../assets/styleout/look.png');
 type Styles = ReturnType<typeof makeStyles>;
@@ -35,13 +35,17 @@ export default function StyleScreen() {
   const { signOut } = useClerk();
   const { bodyPhoto, bodyPhotoPath, items, savedLooks, saveLook, generateLook, updateLookTitle,
     updateLookBackgroundBlur, beginWardrobeDraft, pendingStyleSelection, clearPendingStyleSelection,
-    imageGenerationModel, setImageGenerationModel, onboardingLoaded, onboardingComplete, onboardingReplayRequested, completeOnboarding } = useCloset();
+    imageGenerationModel, setImageGenerationModel, hasAiGatewayKey, saveAiGatewayKey, onboardingLoaded, onboardingComplete, onboardingReplayRequested, completeOnboarding } = useCloset();
   const [styleName, setStyleName] = useState('');
   const [active, setActive] = useState(1);
   const [swapOpen, setSwapOpen] = useState(false);
   const [photoPickerOpen, setPhotoPickerOpen] = useState(false);
   const [instructionOpen, setInstructionOpen] = useState(false);
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
+  const [gatewayKeyModalOpen, setGatewayKeyModalOpen] = useState(false);
+  const [gatewayKeyDraft, setGatewayKeyDraft] = useState('');
+  const [pendingModel, setPendingModel] = useState<string | null>(null);
+  const [savingGatewayKey, setSavingGatewayKey] = useState(false);
   const [tourVisible, setTourVisible] = useState(false);
   const [generationInstructions, setGenerationInstructions] = useState('');
   const [instructionDraft, setInstructionDraft] = useState('');
@@ -128,7 +132,8 @@ export default function StyleScreen() {
     try {
       const title = styleName.trim();
       if (!title) throw new Error('Name your style before generating it.');
-      if (selections.length > 2) throw new Error('Grok Imagine accepts your photo plus two wardrobe pieces. To generate a layered look, keep the Top and Outerwear selections and clear another piece.');
+      const maxWardrobeItems = maxWardrobeItemsForModel(imageGenerationModel);
+      if (selections.length > maxWardrobeItems) throw new Error(`${selectedImageModel.name} accepts your photo plus up to ${maxWardrobeItems} wardrobe pieces. Remove ${selections.length - maxWardrobeItems} selected ${selections.length - maxWardrobeItems === 1 ? 'piece' : 'pieces'} and try again.`);
       let id = savedLook?.id;
       if (id && title !== savedLook?.title) await updateLookTitle(id, title);
       if (!id) id = await saveLook(title, selections, selectedNames, backgroundBlur);
@@ -218,7 +223,7 @@ export default function StyleScreen() {
               <Text style={[s.actionLabel, backgroundBlur && s.actionActive]}>Blur</Text>
             </Pressable>
           </View>
-          <Text style={s.helpText}>{savedLook?.generationStatus === 'failed' ? savedLook.generationError || 'Image generation failed. You can retry.' : savedLook?.generationStatus === 'running' && !generating ? 'Generation took too long. Tap Retry AI look.' : saveMessage || (!bodyPhotoPath ? 'Add your photo, then choose wardrobe pieces to save a style.' : !selections.length ? 'Swap in at least one piece from your wardrobe to save this style.' : selections.length > 2 ? 'You can save all selected pieces, but AI accepts your photo plus two garments. For a layered try-on, keep your Top and Outerwear selected and clear another piece.' : selectedCategories.includes('Tops') && selectedCategories.includes('Outerwear') ? 'Your AI try-on will layer the selected top under your outerwear.' : `${selections.length} ${selections.length === 1 ? 'piece' : 'pieces'} selected. AI generation uses your photo plus up to two selected wardrobe pieces.`)}</Text>
+          <Text style={s.helpText}>{savedLook?.generationStatus === 'failed' ? savedLook.generationError || 'Image generation failed. You can retry.' : savedLook?.generationStatus === 'running' && !generating ? 'Generation took too long. Tap Retry AI look.' : saveMessage || (!bodyPhotoPath ? 'Add your photo, then choose wardrobe pieces to save a style.' : !selections.length ? 'Swap in at least one piece from your wardrobe to save a style.' : selections.length > maxWardrobeItemsForModel(imageGenerationModel) ? `You can save all selected pieces, but ${selectedImageModel.name} accepts your photo plus up to ${maxWardrobeItemsForModel(imageGenerationModel)} wardrobe pieces.` : selectedCategories.includes('Tops') && selectedCategories.includes('Outerwear') ? 'Your AI try-on will layer the selected top under your outerwear.' : `${selections.length} ${selections.length === 1 ? 'piece' : 'pieces'} selected. ${selectedImageModel.name} supports up to ${maxWardrobeItemsForModel(imageGenerationModel)} wardrobe pieces with your photo.`)}</Text>
         </View>
       </ScrollView>
       <OnboardingTour visible={tourVisible} onFinish={() => { setTourVisible(false); void completeOnboarding(); }} />
@@ -259,18 +264,44 @@ export default function StyleScreen() {
           <Pressable style={s.modelSheet} onPress={(event) => event.stopPropagation()}>
             <View style={s.handle} />
             <View style={s.modalHeader}><View><SmallCaps>AI GATEWAY</SmallCaps><Text style={s.modalTitle}>Choose a model</Text></View><Pressable onPress={() => setModelPickerOpen(false)} accessibilityLabel="Close model picker"><Text style={s.close}>×</Text></Pressable></View>
-            <Text style={s.modelPickerDescription}>Each generation uses your Vercel AI Gateway credits. Rates vary by model.</Text>
+            <Text style={s.modelPickerDescription}>Each generation uses your Vercel AI Gateway credits. Rates and image limits vary by model.</Text>
             <ScrollView style={s.modelList} showsVerticalScrollIndicator={false}>
               {IMAGE_GENERATION_MODELS.map((model) => {
                 const selected = imageGenerationModel === model.id;
-                return <Pressable key={model.id} accessibilityRole="radio" accessibilityState={{ checked: selected }} onPress={() => { setImageGenerationModel(model.id); setModelPickerOpen(false); }} style={[s.modelOption, selected && s.modelOptionSelected]}>
-                  <View style={{ flex: 1 }}><Text style={s.modelOptionName}>{model.name}</Text><Text style={s.modelOptionDetail}>{model.detail}</Text></View>
+                const locked = model.id !== DEFAULT_IMAGE_GENERATION_MODEL && !hasAiGatewayKey;
+                return <Pressable key={model.id} accessibilityRole="radio" accessibilityState={{ checked: selected, disabled: locked }} onPress={() => {
+                  if (locked) { setPendingModel(model.id); setGatewayKeyDraft(''); setModelPickerOpen(false); setGatewayKeyModalOpen(true); return; }
+                  setImageGenerationModel(model.id); setModelPickerOpen(false);
+                }} style={[s.modelOption, selected && s.modelOptionSelected, locked && s.modelOptionLocked]}>
+                  <View style={{ flex: 1 }}><Text style={[s.modelOptionName, locked && s.modelOptionNameLocked]}>{model.name}</Text><Text style={s.modelOptionDetail}>{model.detail}</Text>{locked ? <Text style={s.modelKeyRequired}>Your AI Gateway key is required to use this model.</Text> : null}</View>
                   <Text style={[s.modelOptionCheck, selected && s.modelOptionCheckSelected]}>{selected ? '✓' : ''}</Text>
                 </Pressable>;
               })}
             </ScrollView>
             <Text style={s.modelCostNote}>Model access and current rates are managed in your AI Gateway account.</Text>
           </Pressable>
+        </Pressable>
+      </Modal>
+      <Modal visible={gatewayKeyModalOpen} transparent animationType="fade" onRequestClose={() => setGatewayKeyModalOpen(false)}>
+        <Pressable style={s.modelBackdrop} onPress={() => { if (!savingGatewayKey) setGatewayKeyModalOpen(false); }} accessibilityLabel="Close AI Gateway key dialog">
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={s.keyDialogWrap}>
+            <Pressable style={s.keyDialog} onPress={(event) => event.stopPropagation()}>
+              <View style={s.modalHeader}><View><SmallCaps>UNLOCK A MODEL</SmallCaps><Text style={s.modalTitle}>Add your Gateway key</Text></View><Pressable disabled={savingGatewayKey} onPress={() => setGatewayKeyModalOpen(false)} accessibilityLabel="Close key dialog"><Text style={s.close}>×</Text></Pressable></View>
+              <Text style={s.keyDialogCopy}>Your key is stored encrypted in Supabase and used only when generating with {IMAGE_GENERATION_MODELS.find((model) => model.id === pendingModel)?.name || 'this model'}. The default model continues to use Styleout’s built-in key.</Text>
+              <TextInput value={gatewayKeyDraft} onChangeText={setGatewayKeyDraft} autoCapitalize="none" autoCorrect={false} autoComplete="off" secureTextEntry placeholder="Vercel AI Gateway API key" placeholderTextColor="#A7A7A2" style={s.keyInput} accessibilityLabel="Your Vercel AI Gateway API key" />
+              <ActionButton disabled={savingGatewayKey || gatewayKeyDraft.trim().length < 20} onPress={async () => {
+                setSavingGatewayKey(true);
+                try {
+                  await saveAiGatewayKey(gatewayKeyDraft);
+                  if (pendingModel) setImageGenerationModel(pendingModel as typeof imageGenerationModel);
+                  setGatewayKeyModalOpen(false);
+                  setGatewayKeyDraft('');
+                  showToast('Your AI Gateway key is saved securely.');
+                } catch (error) { showToast(error instanceof Error ? error.message : 'Could not save your key.', 'error'); }
+                finally { setSavingGatewayKey(false); }
+              }} label={savingGatewayKey ? 'Saving securely…' : 'Save key & unlock model'} style={s.keySaveButton} />
+            </Pressable>
+          </KeyboardAvoidingView>
         </Pressable>
       </Modal>
       <PicChangeCarousel visible={photoPickerOpen} onClose={() => setPhotoPickerOpen(false)} />
@@ -296,7 +327,8 @@ const makeStyles = (palette: ThemeColors) => StyleSheet.create({
   changePhoto: { position: 'absolute', bottom: 14, right: 14, backgroundColor: palette.surface, paddingHorizontal: 11, paddingVertical: 8, borderRadius: 12 }, changePhotoText: { fontSize: 11, fontWeight: '600', color: palette.ink },
   details: { marginHorizontal: 24, paddingTop: 8 },
   modelPickerBlock: { marginBottom: 8 }, modelPicker: { minHeight: 43, flexDirection: 'row', alignItems: 'center', gap: 9, borderWidth: 1, borderColor: palette.line, borderRadius: 13, paddingHorizontal: 12, paddingVertical: 7, backgroundColor: palette.surface }, modelPickerLabel: { fontSize: 9, letterSpacing: 1.3 }, modelPickerName: { flex: 1, color: palette.ink, fontSize: 12, fontWeight: '700' }, modelPickerChevron: { color: palette.ink, fontSize: 20, paddingHorizontal: 4, lineHeight: 23 },
-  modelBackdrop: { flex: 1, justifyContent: 'flex-end', backgroundColor: '#0006' }, modelSheet: { maxHeight: '82%', backgroundColor: palette.paper, borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 24, paddingBottom: 30 }, modelPickerDescription: { color: palette.muted, fontSize: 12, lineHeight: 18, marginTop: -8, marginBottom: 12 }, modelList: { flexGrow: 0 }, modelOption: { minHeight: 68, flexDirection: 'row', alignItems: 'center', gap: 12, borderWidth: 1, borderColor: palette.line, borderRadius: 15, paddingHorizontal: 14, paddingVertical: 11, marginBottom: 8, backgroundColor: palette.surface }, modelOptionSelected: { borderColor: palette.olive, backgroundColor: palette.oliveWash }, modelOptionName: { color: palette.ink, fontSize: 13, fontWeight: '700' }, modelOptionDetail: { color: palette.muted, fontSize: 11, marginTop: 4 }, modelOptionCheck: { width: 22, height: 22, textAlign: 'center', overflow: 'hidden', color: palette.paper, backgroundColor: palette.line, borderRadius: 11, fontSize: 14, lineHeight: 22, fontWeight: '800' }, modelOptionCheckSelected: { backgroundColor: palette.olive }, modelCostNote: { color: palette.muted, fontSize: 10, lineHeight: 15, marginTop: 5 },
+  modelBackdrop: { flex: 1, justifyContent: 'flex-end', backgroundColor: '#0006' }, modelSheet: { maxHeight: '82%', backgroundColor: palette.paper, borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 24, paddingBottom: 30 }, modelPickerDescription: { color: palette.muted, fontSize: 12, lineHeight: 18, marginTop: -8, marginBottom: 12 }, modelList: { flexGrow: 0 }, modelOption: { minHeight: 68, flexDirection: 'row', alignItems: 'center', gap: 12, borderWidth: 1, borderColor: palette.line, borderRadius: 15, paddingHorizontal: 14, paddingVertical: 11, marginBottom: 8, backgroundColor: palette.surface }, modelOptionSelected: { borderColor: palette.olive, backgroundColor: palette.oliveWash }, modelOptionLocked: { opacity: 0.55 }, modelOptionName: { color: palette.ink, fontSize: 13, fontWeight: '700' }, modelOptionNameLocked: { color: palette.muted }, modelOptionDetail: { color: palette.muted, fontSize: 11, marginTop: 4 }, modelKeyRequired: { color: palette.olive, fontSize: 10, fontWeight: '600', marginTop: 5 }, modelOptionCheck: { width: 22, height: 22, textAlign: 'center', overflow: 'hidden', color: palette.paper, backgroundColor: palette.line, borderRadius: 11, fontSize: 14, lineHeight: 22, fontWeight: '800' }, modelOptionCheckSelected: { backgroundColor: palette.olive }, modelCostNote: { color: palette.muted, fontSize: 10, lineHeight: 15, marginTop: 5 },
+  keyDialogWrap: { flex: 1, justifyContent: 'center', padding: 22 }, keyDialog: { width: '100%', maxWidth: 480, alignSelf: 'center', padding: 22, borderRadius: 24, backgroundColor: palette.paper }, keyDialogCopy: { color: palette.muted, fontSize: 12, lineHeight: 18, marginTop: -4, marginBottom: 18 }, keyInput: { height: 50, paddingHorizontal: 14, borderWidth: 1, borderColor: palette.line, borderRadius: 13, color: palette.ink, backgroundColor: palette.surface, marginBottom: 14 }, keySaveButton: { marginTop: 4 },
   actionDock: { minHeight: 78, flexDirection: 'row', alignItems: 'stretch', borderWidth: 1, borderColor: palette.line, borderRadius: 19, overflow: 'hidden', backgroundColor: palette.surface },
   actionItem: { flex: 1, minWidth: 0, alignItems: 'center', justifyContent: 'center', gap: 6, paddingHorizontal: 3, paddingVertical: 10 },
   actionPrimary: { backgroundColor: palette.oliveWash }, actionPressed: { opacity: 0.68 }, actionDisabled: { opacity: 0.45 },

@@ -17,3 +17,7 @@ entrypoint = './functions/instagram-media/index.js'
 [functions.delete-styleout-account]
 verify_jwt = false
 entrypoint = './functions/delete-styleout-account/index.js'
+
+[functions.manage-ai-gateway-key]
+verify_jwt = false
+entrypoint = './functions/manage-ai-gateway-key/index.js'

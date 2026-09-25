@@ -84,6 +84,9 @@ type ClosetState = {
   generateLook: (id: string, instructions?: string, backgroundBlur?: boolean, regenerate?: boolean) => Promise<void>;
   imageGenerationModel: ImageGenerationModel;
   setImageGenerationModel: (model: ImageGenerationModel) => void;
+  hasAiGatewayKey: boolean;
+  saveAiGatewayKey: (key: string) => Promise<void>;
+  removeAiGatewayKey: () => Promise<void>;
   updateLookBackgroundBlur: (id: string, backgroundBlur: boolean) => Promise<void>;
   updateLookTitle: (id: string, title: string) => Promise<void>;
   removeLook: (id: string) => Promise<void>;
@@ -203,6 +206,8 @@ export function ClosetProvider({ children, userId }: { children: React.ReactNode
   const [mainPhotos, setMainPhotos] = useState<MainPhoto[]>([]);
   const [savedLooks, setSavedLooks] = useState<SavedLook[]>([]);
   const [imageGenerationModel, setImageGenerationModelState] = useState<ImageGenerationModel>(DEFAULT_IMAGE_GENERATION_MODEL);
+  const [hasAiGatewayKey, setHasAiGatewayKey] = useState(false);
+  const [aiGatewayKeyStatusLoaded, setAiGatewayKeyStatusLoaded] = useState(false);
   const [onboardingLoaded, setOnboardingLoaded] = useState(false);
   const [onboardingComplete, setOnboardingCompleteState] = useState(true);
   const [onboardingReplayRequested, setOnboardingReplayRequested] = useState(false);
@@ -218,6 +223,9 @@ export function ClosetProvider({ children, userId }: { children: React.ReactNode
   const pendingGenerationToasts = useRef<Array<{ message: string; tone: 'success' | 'error' }>>([]);
 
   useEffect(() => {
+    setHasAiGatewayKey(false);
+    setAiGatewayKeyStatusLoaded(false);
+    setImageGenerationModelState(DEFAULT_IMAGE_GENERATION_MODEL);
     onboardingUserRef.current = null;
     setOnboardingLoaded(!userId);
     setOnboardingCompleteState(!userId);
@@ -240,6 +248,31 @@ export function ClosetProvider({ children, userId }: { children: React.ReactNode
     setOnboardingLoaded(true);
   }, []);
 
+  const manageAiGatewayKey = useCallback(async (action: 'status' | 'save' | 'remove', key?: string) => {
+    if (!client || !userId) throw new Error('Sign in to manage your AI Gateway key.');
+    const token = await getTokenRef.current();
+    if (!token) throw new Error('Your session expired. Sign in again and retry.');
+    const { data, error } = await client.functions.invoke('manage-ai-gateway-key', {
+      body: { action, ...(key ? { key } : {}) },
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (error) {
+      const response = 'context' in error && error.context instanceof Response ? error.context : null;
+      const payload = response ? await response.json().catch(() => null) : null;
+      throw new Error(payload?.error || 'Could not update your AI Gateway key. Please try again.');
+    }
+    return data as { hasKey: boolean };
+  }, [client, userId]);
+
+  useEffect(() => {
+    let active = true;
+    setHasAiGatewayKey(false);
+    if (client && userId) manageAiGatewayKey('status').then((result) => {
+      if (active) setHasAiGatewayKey(result.hasKey);
+    }).catch(() => {}).finally(() => { if (active) setAiGatewayKeyStatusLoaded(true); });
+    return () => { active = false; };
+  }, [client, manageAiGatewayKey, userId]);
+
   useEffect(() => {
     if (!userId) return;
     let active = true;
@@ -248,6 +281,12 @@ export function ClosetProvider({ children, userId }: { children: React.ReactNode
     }).catch(() => {});
     return () => { active = false; };
   }, [userId]);
+
+  useEffect(() => {
+    if (!userId || !aiGatewayKeyStatusLoaded || hasAiGatewayKey || imageGenerationModel === DEFAULT_IMAGE_GENERATION_MODEL) return;
+    setImageGenerationModelState(DEFAULT_IMAGE_GENERATION_MODEL);
+    AsyncStorage.setItem(`styleout.imageModel.${userId}`, DEFAULT_IMAGE_GENERATION_MODEL).catch(() => {});
+  }, [aiGatewayKeyStatusLoaded, hasAiGatewayKey, imageGenerationModel, userId]);
 
   useEffect(() => {
     generationStatuses.current.clear();
@@ -516,7 +555,19 @@ export function ClosetProvider({ children, userId }: { children: React.ReactNode
       setImageGenerationModelState(model);
       if (userId) AsyncStorage.setItem(`styleout.imageModel.${userId}`, model).catch(() => {});
     },
+    hasAiGatewayKey,
+    saveAiGatewayKey: async (key) => {
+      const result = await manageAiGatewayKey('save', key.trim());
+      setHasAiGatewayKey(result.hasKey);
+    },
+    removeAiGatewayKey: async () => {
+      await manageAiGatewayKey('remove');
+      setHasAiGatewayKey(false);
+      setImageGenerationModelState(DEFAULT_IMAGE_GENERATION_MODEL);
+      if (userId) await AsyncStorage.setItem(`styleout.imageModel.${userId}`, DEFAULT_IMAGE_GENERATION_MODEL).catch(() => {});
+    },
     generateLook: async (id, instructions = '', backgroundBlur = false, regenerate = false) => {
+      if (imageGenerationModel !== DEFAULT_IMAGE_GENERATION_MODEL && !hasAiGatewayKey) throw new Error('Add your own AI Gateway key in Profile to use this model.');
       const token = await getTokenRef.current();
       if (!token) throw new Error('Sign in to generate a look.');
       const { data, error } = await client.functions.invoke('generate-styleout-look', {

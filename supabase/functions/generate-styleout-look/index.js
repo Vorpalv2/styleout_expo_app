@@ -4,12 +4,12 @@ import { createGateway, generateImage } from 'npm:ai@6';
 const headers = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, apikey, content-type, x-client-info', 'Access-Control-Allow-Methods': 'POST, OPTIONS', 'Content-Type': 'application/json' };
 const bucket = 'styleout-images';
 const defaultModel = 'spacexai/grok-imagine-image';
-const allowedModels = new Set([
-  defaultModel,
-  'spacexai/grok-imagine-image-2.0',
-  'bfl/flux-kontext-pro',
-  'openai/gpt-image-2.5-flare',
-  'openai/gpt-image-2.5-sunburst',
+const modelReferenceLimits = new Map([
+  [defaultModel, 3],
+  ['spacexai/grok-imagine-image-2.0', 5],
+  ['bfl/flux-kontext-pro', 4],
+  ['openai/gpt-image-2.5-flare', 4],
+  ['openai/gpt-image-2.5-sunburst', 4],
 ]);
 const reply = (status, payload) => new Response(JSON.stringify(payload), { status, headers });
 const validId = (value) => typeof value === 'string' && /^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(value);
@@ -30,48 +30,43 @@ async function downloadImage(admin, path) {
 }
 
 function promptFor(items, additionalInstructions, backgroundBlur) {
-  const list = items.map((item, index) => {
+  const imageCount = items.length + 1;
+  const garmentReferences = items.map((item, index) => {
     const details = [
       item.item_color ? `color: ${item.item_color}` : '',
       item.item_brand ? `brand: ${item.item_brand}` : '',
       item.item_notes ? `description: ${item.item_notes}` : '',
     ].filter(Boolean).join('; ');
-    return `${index + 2}. ${item.item_category}: ${item.item_name.slice(0, 80)}${details ? ` (${details})` : ''}`;
+    return `Image ${index + 2} — ${item.item_category}: ${item.item_name.slice(0, 80)}${details ? ` (${details})` : ''}. Use only this selected item from this reference.`;
   }).join('\n');
   const topIndex = items.findIndex((item) => item.item_category === 'Tops');
   const outerwearIndex = items.findIndex((item) => item.item_category === 'Outerwear');
   const top = topIndex >= 0 ? items[topIndex] : null;
   const outerwear = outerwearIndex >= 0 ? items[outerwearIndex] : null;
   const layeringRequest = top && outerwear
-    ? `\n\nREQUIRED LAYER REPLACEMENT — Image ${topIndex + 2} is the ONLY shirt/top to use: “${top.item_name}”${top.item_color ? `, color ${top.item_color}` : ''}. Image ${outerwearIndex + 2} supplies ONLY the outerwear garment: “${outerwear.item_name}”${outerwear.item_color ? `, color ${outerwear.item_color}` : ''}. The person/model and every other garment visible in either clothing reference are irrelevant. In particular, discard the shirt visible underneath the outerwear in Image ${outerwearIndex + 2}; it is merely part of that product photo and must not appear in the result. Dress the person in Image 1 in the selected ${top.item_name} as the sole base shirt, then layer the selected ${outerwear.item_name} over it. Every visible part of the shirt layer—including collar, chest/front opening, cuffs and sleeves—must match Image ${topIndex + 2}; do not leave, add, or reveal any white undershirt, default shirt, or shirt copied from Image ${outerwearIndex + 2}. If needed, adjust only the outerwear opening/overlap to show the selected top. Do not change Image 1 or add a second shirt layer.`
+    ? `\n\nREQUIRED LAYERING: Image ${topIndex + 2} is the only selected shirt/top and must be worn as the base layer. Image ${outerwearIndex + 2} supplies only the named outerwear. Completely ignore any shirt, undershirt, or other clothing visible beneath it in the outerwear product photo. Do not copy that incidental shirt. The visible collar, chest, opening, cuffs, and sleeves of the base layer must come from Image ${topIndex + 2}. Layer the selected outerwear over it; adjust only the outerwear opening if needed to show the selected top.`
     : '';
   const backgroundRequest = backgroundBlur
-    ? '\n\nBACKGROUND BLUR: Apply a subtle, natural depth-of-field blur only to the existing scene behind the person. Keep the person, selected outfit and every visible body part crisp and unchanged. Preserve the same background objects, colors, lighting and composition; soften their focus without replacing or removing them.'
+    ? '\n\nBACKGROUND BLUR: Apply subtle, natural depth-of-field blur only to the existing background behind the person. Keep the person, clothes, accessories, and all visible body parts crisp. Preserve the same background objects, colors, lighting, and layout.'
     : '';
   const userRequest = additionalInstructions
-    ? `\n\nADDITIONAL USER STYLING REQUEST:\n${additionalInstructions}\nApply this request only where it is compatible with the identity lock, body lock and edit boundary above. It may guide garment fit, styling, layering or accessory placement, but it must never alter the person's identity, face, skin, body, pose or other protected details.`
+    ? `\n\nADDITIONAL USER STYLING REQUEST:\n${additionalInstructions}\nApply only to garment fit, styling, layering, or accessory placement. It must not override the identity, body, pose, or image-role instructions.`
     : '';
-  return `Perform a precise photorealistic virtual try-on edit.
+  return `Create a photorealistic virtual try-on by editing the supplied reference images.
 
-IMAGE 1 IS THE IMMUTABLE PERSON AND SCENE REFERENCE. The result must unmistakably be the exact same photograph of the exact same person, with only the selected clothing and accessories changed. Do not reinterpret, regenerate, beautify, retouch, reshape, age, de-age, or stylize the person.
+IMAGE INPUT MAP — this request contains exactly ${imageCount} images, passed in this order:
+Image 1 is the user's original photograph. It is the immutable base canvas and must occupy the whole output.
+${garmentReferences}
 
-IDENTITY LOCK — preserve exactly from Image 1:
-- facial geometry and every facial feature, including eyes, eyebrows, nose, lips, teeth, ears, jawline and face shape
-- expression, gaze, head angle, hairstyle, hairline, facial hair and makeup
-- skin tone, skin texture, marks, freckles and other identifying details
+OUTPUT COMPOSITION: Return one single, continuous, full-length portrait photograph based on Image 1. Never create a collage, grid, split screen, contact sheet, catalog, mood board, inset, border, or pasted rectangle of any input image. Images 2 through ${imageCount} are visual garment references only, never layout or scene references. For every wardrobe reference, extract only the named selected item and transfer it onto the person in Image 1. Ignore the reference's model/person, face, body, pose, mannequin, hanger, styling, background, lighting, crop, and framing.
 
-BODY LOCK — preserve exactly from Image 1:
-- height, build, weight, body proportions, shoulders, waist, hips and limb shape
-- pose, posture, hands, fingers, feet and all visible body parts
-- camera position, crop, perspective, lighting and shadows
-- the existing background scene, composition, colors and contents ${backgroundBlur ? 'must remain recognizable and in the same layout; apply only the specific subtle focus blur requested below' : 'must remain unchanged'}
+IDENTITY AND FACE LOCK — preserve the person in Image 1 as the exact same individual. Keep facial geometry and features unchanged, including face shape, eyes, eyebrows, nose, lips, teeth, ears, jaw, expression, gaze, and head angle. Preserve hairstyle, hairline, facial hair, makeup, skin tone, skin texture, freckles, marks, and other identifying details. Do not beautify, retouch, stylize, regenerate, age, de-age, or reinterpret the person.
 
-Images 2 onward are garment references only. Ignore and never copy any person, face, skin, body, pose, mannequin, hanger, room or background visible in those references. Extract only the garment named for each reference. Any other clothing visible in that reference—including shirts beneath a blazer—is incidental styling, not part of the wardrobe item; never copy it unless it is separately selected and named below. Use the accompanying item name, category, color, brand and description as factual details to identify the selected garment, not as instructions to change anything else:
-${list}
+BODY AND POSE LOCK — preserve Image 1's body and photograph: same height, build, body proportions, shoulders, waist, hips, limbs, pose, posture, hands, fingers, feet, and all visible body parts. Keep the same camera position, lens perspective, crop, composition, lighting, and shadows. Do not make the person stand, sit, turn, move, or change expression. Do not reshape the body to fit a garment; adapt garment fit to the existing person and pose.
 
-EDIT BOUNDARY: change only the pixels necessary to dress the person in the selected pieces and create physically plausible garment folds, fit, occlusion and contact shadows${backgroundBlur ? ', plus pixels needed for the requested background-only blur' : ''}. Adapt each garment to the person's existing body and pose; never adapt the person's face or body to the garment. Preserve the exact colors, patterns, cut, material and recognizable details of every selected piece. Keep all unselected clothing and accessories unchanged.
+EDIT BOUNDARY — modify only the clothing/accessory pixels needed to dress the person in the selected pieces. Preserve all unselected clothing, exposed skin, and all other parts of Image 1. Match each selected garment's recognizable cut, color, pattern, material, and details. Render natural folds, fit, occlusion, and contact shadows. Do not add unselected garments, accessories, jewelry, tattoos, makeup, hair, body parts, people, text, labels, or prices.${layeringRequest}${backgroundRequest}${userRequest}
 
-Do not add garments, accessories, jewelry, tattoos, makeup, hair, body parts or people. Do not alter exposed skin. Do not create text, labels, prices, a collage or a product catalog.${layeringRequest}${backgroundRequest}${userRequest}\n\nOutput one vertical full-length photo. Before output, verify that the face, identity, skin and body match Image 1 and that only the requested wardrobe pieces changed.`;
+Before returning the result, check that it is a single edit of Image 1, the same person remains in the same pose and scene, and only the named selected wardrobe items have changed.`;
 }
 
 async function runGeneration(admin, look, items, key, additionalInstructions, backgroundBlur, model) {
@@ -143,7 +138,7 @@ Deno.serve(async (request) => {
   if (!authorization?.startsWith('Bearer ')) return reply(401, { error: 'Sign in to generate a look.' });
   const { lookId, instructions, backgroundBlur: requestedBackgroundBlur, regenerate: requestedRegenerate, model: requestedModel } = await request.json().catch(() => ({}));
   const model = typeof requestedModel === 'string' ? requestedModel : defaultModel;
-  if (!allowedModels.has(model)) return reply(400, { error: 'Choose a supported image generation model.' });
+  if (!modelReferenceLimits.has(model)) return reply(400, { error: 'Choose a supported image generation model.' });
   const backgroundBlur = requestedBackgroundBlur === true;
   const forceRegenerate = requestedRegenerate === true;
   const additionalInstructions = typeof instructions === 'string'
@@ -167,7 +162,8 @@ Deno.serve(async (request) => {
   const { data: items, error: itemsError } = await caller.from('saved_look_items')
     .select('slot_index,item_id,item_name,item_category,item_image_path').eq('look_id', lookId).order('slot_index');
   if (itemsError) return reply(500, { error: 'Could not load this style’s wardrobe pieces.' });
-  if (!items?.length || items.length > 2 || items.some((item) => !item.item_image_path)) return reply(400, { error: 'Grok Imagine accepts your photo plus up to two wardrobe pieces. Select one or two pieces for this AI look.' });
+  const maxWardrobeItems = modelReferenceLimits.get(model) - 1;
+  if (!items?.length || items.length > maxWardrobeItems || items.some((item) => !item.item_image_path)) return reply(400, { error: `${model} accepts your photo plus up to ${maxWardrobeItems} wardrobe pieces. Select one to ${maxWardrobeItems} pieces for this AI look.` });
   const { data: itemDetails, error: detailsError } = await caller.from('wardrobe_items')
     .select('id,color,brand,notes').eq('user_id', look.user_id).in('id', items.map((item) => item.item_id));
   if (detailsError) return reply(500, { error: 'Could not load your wardrobe descriptions for this style.' });
@@ -176,12 +172,24 @@ Deno.serve(async (request) => {
     const details = detailsById.get(item.item_id);
     return { ...item, item_color: details?.color || '', item_brand: details?.brand || '', item_notes: String(details?.notes || '').slice(0, 240).replace(/[\r\n]+/g, ' ') };
   });
-  const key = Deno.env.get('AI_GATEWAY_API_KEY');
-  if (!key) return reply(503, { error: 'The Vercel AI Gateway key has not been configured for this function.' });
+  const admin = createClient(url, service, { auth: { persistSession: false } });
+  let key;
+  if (model === defaultModel) {
+    // The built-in server key remains the default model's credential for every user.
+    key = Deno.env.get('AI_GATEWAY_API_KEY');
+    if (!key) return reply(503, { error: 'The default image model is not configured yet.' });
+  } else {
+    const { data: personalKey, error: keyError } = await admin.rpc('styleout_get_ai_gateway_key', { p_user_id: look.user_id });
+    if (keyError) {
+      console.error('Could not retrieve a user AI Gateway key', keyError.message);
+      return reply(500, { error: 'Could not check your AI Gateway key. Please try again.' });
+    }
+    if (!personalKey) return reply(403, { error: 'Add your own AI Gateway key in Profile to use this model.' });
+    key = personalKey;
+  }
 
   const stale = look.generation_started_at && Date.now() - new Date(look.generation_started_at).getTime() > 150000;
   if (look.generation_status === 'running' && !stale) return reply(202, { status: 'running' });
-  const admin = createClient(url, service, { auth: { persistSession: false } });
   let claim = admin.from('saved_looks').update({ generation_status: 'running', generation_started_at: new Date().toISOString(), generation_error: null, background_blur: backgroundBlur })
     .eq('id', lookId).eq('user_id', look.user_id);
   if (look.generated_image_path && forceRegenerate) claim = claim.eq('generated_image_path', look.generated_image_path);

@@ -11,6 +11,7 @@ import { InstagramImport } from '@/components/InstagramImport';
 import { ClosetRefreshControl } from '@/components/ClosetRefreshControl';
 import { useToast } from '@/components/Toast';
 import { CATEGORIES, SavedLook, useCloset } from '@/lib/closet';
+import { IMAGE_GENERATION_MODELS, maxWardrobeItemsForModel } from '@/lib/imageModels';
 import { downloadImage } from '@/lib/saveImage';
 
 const lookImage = require('../../assets/styleout/look.png');
@@ -23,7 +24,11 @@ export default function ProfileScreen() {
   const { user } = useUser();
   const insets = useSafeAreaInsets();
   const { signOut } = useClerk();
-  const { items, name, bio, bodyPhoto, savedLooks, generateLook, removeLook, previousWardrobeAvailable, importPreviousWardrobe, updateProfile, replayOnboarding, deleteAccount } = useCloset();
+  const { items, name, bio, bodyPhoto, savedLooks, generateLook, imageGenerationModel, removeLook, previousWardrobeAvailable, importPreviousWardrobe, updateProfile, replayOnboarding, deleteAccount, hasAiGatewayKey, saveAiGatewayKey, removeAiGatewayKey } = useCloset();
+  const [profileTab, setProfileTab] = useState<'profile' | 'ai-key'>('profile');
+  const [gatewayKeyDraft, setGatewayKeyDraft] = useState('');
+  const [savingGatewayKey, setSavingGatewayKey] = useState(false);
+  const [removingGatewayKey, setRemovingGatewayKey] = useState(false);
   const [editing, setEditing] = useState(false);
   const [draftName, setDraftName] = useState(name);
   const [draftBio, setDraftBio] = useState(bio);
@@ -38,6 +43,7 @@ export default function ProfileScreen() {
   const [deletingAccount, setDeletingAccount] = useState(false);
   const openLook = selectedLook ? savedLooks.find((look) => look.id === selectedLook.id) || selectedLook : null;
   const fullscreenImage = openLook?.generatedImage || openLook?.image || null;
+  const selectedImageModel = IMAGE_GENERATION_MODELS.find((model) => model.id === imageGenerationModel) || IMAGE_GENERATION_MODELS[0];
   const displayName = name === 'Your profile' ? (user?.fullName || user?.firstName || 'Your profile') : name;
 
   function beginEdit() { setDraftName(name); setDraftBio(bio); setEditing(true); }
@@ -74,6 +80,20 @@ export default function ProfileScreen() {
     try { await importPreviousWardrobe(); }
     catch { Alert.alert('Import failed', 'Your previous wardrobe could not be read on this device.'); }
   }
+  async function saveGatewayKey() {
+    if (gatewayKeyDraft.trim().length < 20 || savingGatewayKey) return;
+    setSavingGatewayKey(true);
+    try { await saveAiGatewayKey(gatewayKeyDraft); setGatewayKeyDraft(''); showToast('Your AI Gateway key is saved securely.'); }
+    catch (error) { showToast(error instanceof Error ? error.message : 'Could not save your key.', 'error'); }
+    finally { setSavingGatewayKey(false); }
+  }
+  async function removeGatewayKey() {
+    if (removingGatewayKey) return;
+    setRemovingGatewayKey(true);
+    try { await removeAiGatewayKey(); setGatewayKeyDraft(''); showToast('Your personal AI Gateway key was removed.'); }
+    catch (error) { showToast(error instanceof Error ? error.message : 'Could not remove your key.', 'error'); }
+    finally { setRemovingGatewayKey(false); }
+  }
   async function deleteSavedLook() {
     if (!selectedLook) return;
     try { await removeLook(selectedLook.id); setSelectedLook(null); showToast('Saved style removed.', 'info'); }
@@ -97,7 +117,12 @@ export default function ProfileScreen() {
   return (
     <View style={s.screen}>
       <ScrollView contentContainerStyle={{ paddingBottom: 36 }} alwaysBounceVertical refreshControl={Platform.OS === 'web' ? undefined : <ClosetRefreshControl />}>
-        <AppHeader eyebrow="YOUR SPACE" title="Profile" right={<RoundAction label="Edit profile" onPress={beginEdit}><Text style={s.editIcon}>✎</Text></RoundAction>} />
+        <AppHeader eyebrow="YOUR SPACE" title="Profile" right={profileTab === 'profile' ? <RoundAction label="Edit profile" onPress={beginEdit}><Text style={s.editIcon}>✎</Text></RoundAction> : null} />
+        <View style={s.profileTabs} accessibilityRole="tablist">
+          <Pressable accessibilityRole="tab" accessibilityState={{ selected: profileTab === 'profile' }} onPress={() => setProfileTab('profile')} style={[s.profileTab, profileTab === 'profile' && s.profileTabActive]}><Text style={[s.profileTabText, profileTab === 'profile' && s.profileTabTextActive]}>Profile</Text></Pressable>
+          <Pressable accessibilityRole="tab" accessibilityState={{ selected: profileTab === 'ai-key' }} onPress={() => setProfileTab('ai-key')} style={[s.profileTab, profileTab === 'ai-key' && s.profileTabActive]}><Text style={[s.profileTabText, profileTab === 'ai-key' && s.profileTabTextActive]}>AI model key</Text></Pressable>
+        </View>
+        {profileTab === 'profile' ? <>
         <View style={s.identity}>
           <View style={s.avatar}>{bodyPhoto ? <LoadingImage source={{ uri: bodyPhoto }} style={s.avatarImage} /> : user?.imageUrl ? <LoadingImage source={{ uri: user.imageUrl }} style={s.avatarImage} /> : <Text style={s.avatarLetter}>{displayName === 'Your profile' ? 'S' : displayName.charAt(0).toUpperCase()}</Text>}</View>
           <Text style={s.name}>{displayName}</Text>
@@ -124,6 +149,17 @@ export default function ProfileScreen() {
         </View>
         <View style={s.appearance}><SmallCaps>APPEARANCE</SmallCaps><Text style={s.appearanceTitle}>Choose your theme</Text><Text style={s.appearanceHint}>Use your device setting or pick a look for Styleout.</Text><View style={s.themeChoices}>{(['system', 'light', 'dark'] as ThemePreference[]).map((option) => <Pressable key={option} accessibilityRole="button" accessibilityState={{ selected: preference === option }} onPress={() => { void setPreference(option); }} style={[s.themeChoice, preference === option && s.themeChoiceActive]}><Text style={[s.themeChoiceText, preference === option && s.themeChoiceTextActive]}>{option === 'system' ? 'System' : option === 'light' ? 'Light' : 'Dark'}</Text></Pressable>)}</View><Text style={s.themeState}>{isDark ? 'Dark appearance is on' : 'Light appearance is on'}</Text></View>
         <View style={s.account}><SmallCaps>ACCOUNT</SmallCaps><Text style={s.accountEmail}>{user?.primaryEmailAddress?.emailAddress || 'Signed in with Clerk'}</Text><Pressable onPress={leaveAccount} disabled={signingOut} style={s.signOut}><Text style={s.signOutText}>{signingOut ? 'Signing out…' : 'Sign out'}</Text><Text style={s.signOutText}>↗</Text></Pressable><Pressable onPress={() => { setDeleteConfirmation(''); setDeleteAccountOpen(true); }} accessibilityRole="button" style={s.deleteAccountButton}><Text style={s.deleteAccountText}>Delete account</Text></Pressable></View>
+        </> : <View style={s.gatewayKeyPanel}>
+          <SmallCaps>MODEL ACCESS</SmallCaps>
+          <Text style={s.gatewayKeyTitle}>Your AI Gateway key</Text>
+          <Text style={s.gatewayKeyCopy}>The default model uses Styleout’s built-in key, so you can keep generating without adding one. Add your own Vercel AI Gateway API key to unlock every other model. Your key is stored encrypted in Supabase and is used only for image generation.</Text>
+          <View style={s.gatewayStatus}><View style={[s.gatewayStatusDot, hasAiGatewayKey && s.gatewayStatusDotOn]} /><Text style={s.gatewayStatusText}>{hasAiGatewayKey ? 'Personal key saved securely' : 'No personal key added'}</Text></View>
+          <Text style={s.label}>{hasAiGatewayKey ? 'REPLACE PERSONAL KEY' : 'VERCEL AI GATEWAY API KEY'}</Text>
+          <TextInput value={gatewayKeyDraft} onChangeText={setGatewayKeyDraft} autoCapitalize="none" autoCorrect={false} autoComplete="off" secureTextEntry placeholder={hasAiGatewayKey ? 'Enter a new key to replace it' : 'Paste your AI Gateway API key'} placeholderTextColor={palette.muted} style={s.input} accessibilityLabel="Vercel AI Gateway API key" />
+          <ActionButton onPress={saveGatewayKey} disabled={savingGatewayKey || gatewayKeyDraft.trim().length < 20} label={savingGatewayKey ? 'Saving securely…' : hasAiGatewayKey ? 'Update my key' : 'Save my key'} style={s.gatewaySaveButton} />
+          {hasAiGatewayKey ? <Pressable onPress={removeGatewayKey} disabled={removingGatewayKey} style={s.gatewayRemove}><Text style={s.gatewayRemoveText}>{removingGatewayKey ? 'Removing key…' : 'Remove personal key'}</Text></Pressable> : null}
+          <View style={s.gatewayNotice}><Text style={s.gatewayNoticeTitle}>Default model stays available</Text><Text style={s.gatewayNoticeCopy}>Your key does not replace Styleout’s built-in key for the default model. Removing your personal key locks the other models again and switches the app back to the default.</Text></View>
+        </View>}
       </ScrollView>
       <Modal visible={editing} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setEditing(false)}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={s.formScreen}><ScrollView contentContainerStyle={s.formContent}>
@@ -147,7 +183,7 @@ export default function ProfileScreen() {
               <View style={{ flex: 1 }}><Text style={s.lookPieceName}>{itemName || 'Unavailable piece'}</Text><Text style={s.lookPieceMeta}>{itemCategory || 'Wardrobe item'} · Position {slotIndex + 1}</Text></View>
             </View>) : <Text style={s.lookLegacy}>This style was saved before garment links were added. Its original notes: {openLook.pieces.join(', ') || 'No pieces recorded'}.</Text>}
             {openLook.generationStatus === 'running' ? <Text style={s.lookFuture}>{openLook.generationStartedAt && Date.now() - openLook.generationStartedAt >= 150000 ? 'Generation is delayed. You can retry below.' : 'Your AI look is generating. This view will update when it is ready.'}</Text> : openLook.generationStatus === 'failed' ? <Text style={s.lookFuture}>{openLook.generationError || 'Generation failed. You can retry below.'}</Text> : null}
-            {!openLook.generatedImage && openLook.selections.length > 2 ? <Text style={s.lookFuture}>Grok Imagine can use your photo with up to two wardrobe pieces. Choose one or two pieces on the Style tab to generate an AI look.</Text> : null}
+            {!openLook.generatedImage && openLook.selections.length > maxWardrobeItemsForModel(imageGenerationModel) ? <Text style={s.lookFuture}>{selectedImageModel.name} accepts your photo plus up to {maxWardrobeItemsForModel(imageGenerationModel)} wardrobe pieces. Choose a model that supports more references or remove pieces on the Style tab.</Text> : null}
             {!openLook.generatedImage && openLook.selections.length > 0 && openLook.selections.length <= 2 && (openLook.generationStatus !== 'running' || !!openLook.generationStartedAt && Date.now() - openLook.generationStartedAt >= 150000) ? <ActionButton onPress={retrySavedLook} disabled={startingGeneration} label={startingGeneration ? 'Starting generation…' : '✦  Generate AI look'} style={s.saveButton} /> : null}
             <Pressable onPress={deleteSavedLook} style={s.lookRemove}><Text style={s.lookRemoveText}>Remove saved style</Text></Pressable>
           </> : null}
@@ -183,6 +219,8 @@ export default function ProfileScreen() {
 
 const makeStyles = (palette: ThemeColors) => StyleSheet.create({
   screen: { flex: 1, backgroundColor: palette.paper }, editIcon: { fontSize: 23, color: palette.ink },
+  profileTabs: { marginHorizontal: 24, marginBottom: 5, padding: 4, borderRadius: 15, backgroundColor: palette.canvas, flexDirection: 'row', gap: 4 }, profileTab: { flex: 1, minHeight: 40, alignItems: 'center', justifyContent: 'center', borderRadius: 11 }, profileTabActive: { backgroundColor: palette.ink }, profileTabText: { color: palette.muted, fontSize: 12, fontWeight: '600' }, profileTabTextActive: { color: palette.paper },
+  gatewayKeyPanel: { paddingHorizontal: 24, paddingTop: 32, paddingBottom: 28 }, gatewayKeyTitle: { color: palette.ink, fontSize: 23, fontWeight: '600', letterSpacing: -0.5, marginTop: 8 }, gatewayKeyCopy: { color: palette.muted, fontSize: 13, lineHeight: 20, marginTop: 9, marginBottom: 21 }, gatewayStatus: { minHeight: 46, flexDirection: 'row', alignItems: 'center', gap: 9, borderWidth: 1, borderColor: palette.line, borderRadius: 13, paddingHorizontal: 13, marginBottom: 22, backgroundColor: palette.surface }, gatewayStatusDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: palette.muted }, gatewayStatusDotOn: { backgroundColor: palette.olive }, gatewayStatusText: { color: palette.ink, fontSize: 12, fontWeight: '600' }, gatewaySaveButton: { marginTop: -9 }, gatewayRemove: { alignSelf: 'center', paddingHorizontal: 12, paddingVertical: 14 }, gatewayRemoveText: { color: palette.danger, fontSize: 12, fontWeight: '600' }, gatewayNotice: { marginTop: 20, padding: 15, borderRadius: 14, backgroundColor: palette.oliveWash }, gatewayNoticeTitle: { color: palette.ink, fontSize: 12, fontWeight: '700' }, gatewayNoticeCopy: { color: palette.muted, fontSize: 11, lineHeight: 17, marginTop: 5 },
   tourLink: { marginHorizontal: 24, marginTop: 17, borderRadius: 16, borderWidth: 1, borderColor: palette.line, backgroundColor: palette.surface, paddingHorizontal: 15, paddingVertical: 13, flexDirection: 'row', alignItems: 'center', gap: 12 }, tourLinkIcon: { color: palette.olive, fontSize: 20 }, tourLinkTitle: { color: palette.ink, fontSize: 13, fontWeight: '600' }, tourLinkCopy: { color: palette.muted, fontSize: 11, marginTop: 3 }, tourLinkArrow: { color: palette.olive, fontSize: 16 },
   deleteAccountButton: { minHeight: 48, justifyContent: 'center', marginTop: 9 }, deleteAccountText: { color: palette.danger, fontSize: 13, fontWeight: '600' },
   deleteBackdrop: { flex: 1, backgroundColor: '#0008', justifyContent: 'center', padding: 22 }, deleteCard: { width: '100%', maxWidth: 440, alignSelf: 'center', backgroundColor: palette.paper, borderRadius: 22, borderWidth: 1, borderColor: palette.line, padding: 23 }, deleteTitle: { fontSize: 23, fontWeight: '600', color: palette.ink, letterSpacing: -0.6, marginTop: 10 }, deleteCopy: { color: palette.muted, fontSize: 13, lineHeight: 20, marginTop: 9 }, deletePrompt: { color: palette.ink, fontSize: 12, fontWeight: '700', marginTop: 22, marginBottom: 8 }, deleteInput: { height: 48, paddingHorizontal: 13, borderRadius: 12, borderWidth: 1, borderColor: palette.line, color: palette.ink, backgroundColor: palette.surface, fontSize: 14, letterSpacing: 1 }, deleteActions: { flexDirection: 'row', gap: 10, marginTop: 18 }, cancelDelete: { flex: 1, height: 46, borderRadius: 12, backgroundColor: palette.canvas, alignItems: 'center', justifyContent: 'center' }, cancelDeleteText: { color: palette.ink, fontSize: 13, fontWeight: '600' }, confirmDelete: { flex: 1.5, height: 46, borderRadius: 12, backgroundColor: palette.danger, alignItems: 'center', justifyContent: 'center' }, confirmDeleteDisabled: { opacity: 0.45 }, confirmDeleteText: { color: '#fff', fontSize: 12, fontWeight: '700' },
