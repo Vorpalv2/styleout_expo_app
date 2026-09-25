@@ -6,7 +6,7 @@
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "styleout",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "automatic",
     "ios": {
       "bundleIdentifier": "com.styleout.app",
       "supportsTablet": true
@@ -28,6 +28,7 @@
     },
     "plugins": [
       "expo-router",
+      "expo-system-ui",
       "expo-secure-store",
       "@clerk/expo",
       [

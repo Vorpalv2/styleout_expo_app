@@ -1,12 +1,14 @@
 import { useRouter } from 'expo-router';
 import { useMemo, useState } from 'react';
-import { Alert, Modal, Platform, Pressable, ScrollView, StatusBar, StyleSheet, Text, View } from 'react-native';
+import { Modal, Platform, Pressable, ScrollView, StatusBar, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LoadingImage } from '@/components/LoadingImage';
 import { ClosetRefreshControl } from '@/components/ClosetRefreshControl';
-import { palette, SmallCaps } from '@/components/StyleoutUI';
+import { radii, SmallCaps } from '@/components/StyleoutUI';
+import { ThemeColors, useStyleoutTheme } from '@/components/StyleoutTheme';
 import { SavedLook, useCloset } from '@/lib/closet';
 import { downloadImage } from '@/lib/saveImage';
+import { useToast } from '@/components/Toast';
 
 const lookImage = require('../../assets/styleout/look.png');
 const SORTS = [
@@ -20,6 +22,9 @@ type SortKey = (typeof SORTS)[number]['key'];
 export default function LooksScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { colors: palette } = useStyleoutTheme();
+  const { showToast } = useToast();
+  const s = useMemo(() => makeStyles(palette), [palette]);
   const { savedLooks } = useCloset();
   const [sort, setSort] = useState<SortKey>('newest');
   const [filterOpen, setFilterOpen] = useState(false);
@@ -35,8 +40,8 @@ export default function LooksScreen() {
     const url = preview?.generatedImage || preview?.image;
     if (!url || downloading) return;
     setDownloading(true);
-    try { await downloadImage(url, preview?.title || 'styleout-look'); Alert.alert('Image saved', 'This look was downloaded successfully.'); }
-    catch (error) { Alert.alert('Download unavailable', error instanceof Error ? error.message : 'Please try again.'); }
+    try { await downloadImage(url, preview?.title || 'styleout-look'); showToast('Saved look downloaded to your device.'); }
+    catch (error) { showToast(error instanceof Error ? error.message : 'Download unavailable. Please try again.', 'error'); }
     finally { setDownloading(false); }
   }
 
@@ -52,11 +57,11 @@ export default function LooksScreen() {
   </View>;
 }
 
-const s = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: palette.paper }, content: { paddingHorizontal: 20, paddingTop: 18, paddingBottom: 40, width: '100%', maxWidth: 940, alignSelf: 'center' },
-  header: { flexDirection: 'row', alignItems: 'center', minHeight: 64 }, back: { width: 42, height: 42, borderRadius: 16, backgroundColor: palette.canvas, alignItems: 'center', justifyContent: 'center', marginRight: 14 }, backText: { color: palette.ink, fontSize: 32, lineHeight: 34, marginTop: -3 }, heading: { flex: 1 }, title: { color: palette.ink, fontSize: 28, fontWeight: '600', letterSpacing: -0.9, marginTop: 5 }, count: { color: palette.ink, fontSize: 35, fontWeight: '700', letterSpacing: -1.5 },
-  toolbar: { zIndex: 3, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 24, marginBottom: 18 }, resultText: { color: palette.muted, fontSize: 12 }, filterButton: { minWidth: 150, height: 42, borderRadius: 13, borderWidth: 1, borderColor: palette.line, paddingHorizontal: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, backgroundColor: '#fff' }, filterButtonText: { color: palette.ink, fontSize: 12, fontWeight: '600' }, chevron: { color: palette.muted, fontSize: 15 }, filterMenu: { position: 'absolute', right: 0, top: 48, minWidth: 210, borderRadius: 15, padding: 6, backgroundColor: '#fff', borderWidth: 1, borderColor: palette.line, shadowColor: '#000', shadowOpacity: 0.12, shadowRadius: 18, shadowOffset: { width: 0, height: 8 }, elevation: 8 }, menuLabel: { color: palette.muted, fontSize: 9, fontWeight: '700', letterSpacing: 1.2, paddingHorizontal: 12, paddingTop: 9, paddingBottom: 5 }, menuDivider: { height: 1, backgroundColor: palette.line, marginVertical: 5 }, filterOption: { height: 42, borderRadius: 10, paddingHorizontal: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }, filterOptionActive: { backgroundColor: palette.canvas }, filterOptionText: { color: palette.muted, fontSize: 12 }, filterOptionTextActive: { color: palette.ink, fontWeight: '700' }, check: { color: palette.olive, fontWeight: '700' },
-  grid: { zIndex: 1, flexDirection: 'row', flexWrap: 'wrap', gap: 14 }, card: { width: '48%', flexGrow: 1, maxWidth: 290, marginBottom: 10 }, imageWrap: { aspectRatio: 0.78, borderRadius: 18, overflow: 'hidden', backgroundColor: palette.canvas }, image: { width: '100%', height: '100%' }, numberBadge: { position: 'absolute', top: 10, left: 10, minWidth: 31, height: 25, borderRadius: 13, backgroundColor: '#FFFFFFE8', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 7 }, numberText: { color: palette.ink, fontSize: 9, fontWeight: '700', letterSpacing: 0.8 }, cardTitle: { color: palette.ink, fontSize: 15, fontWeight: '600', marginTop: 10 }, cardMeta: { color: palette.muted, fontSize: 9, fontWeight: '700', letterSpacing: 0.8, marginTop: 4 },
+const makeStyles = (palette: ThemeColors) => StyleSheet.create({
+  screen: { flex: 1, backgroundColor: palette.paper }, content: { paddingHorizontal: 24, paddingTop: 18, paddingBottom: 40, width: '100%', maxWidth: 940, alignSelf: 'center' },
+  header: { flexDirection: 'row', alignItems: 'center', minHeight: 64 }, back: { width: 42, height: 42, borderRadius: radii.control, backgroundColor: palette.canvas, alignItems: 'center', justifyContent: 'center', marginRight: 14 }, backText: { color: palette.ink, fontSize: 32, lineHeight: 34, marginTop: -3 }, heading: { flex: 1 }, title: { color: palette.ink, fontSize: 28, fontWeight: '600', letterSpacing: -0.9, marginTop: 5 }, count: { color: palette.ink, fontSize: 35, fontWeight: '700', letterSpacing: -1.5 },
+  toolbar: { zIndex: 3, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 24, marginBottom: 18 }, resultText: { color: palette.muted, fontSize: 12 }, filterButton: { minWidth: 150, height: 42, borderRadius: 13, borderWidth: 1, borderColor: palette.line, paddingHorizontal: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, backgroundColor: palette.surface }, filterButtonText: { color: palette.ink, fontSize: 12, fontWeight: '600' }, chevron: { color: palette.muted, fontSize: 15 }, filterMenu: { position: 'absolute', right: 0, top: 48, minWidth: 210, borderRadius: 15, padding: 6, backgroundColor: palette.surface, borderWidth: 1, borderColor: palette.line, shadowColor: '#000', shadowOpacity: 0.12, shadowRadius: 18, shadowOffset: { width: 0, height: 8 }, elevation: 8 }, menuLabel: { color: palette.muted, fontSize: 9, fontWeight: '700', letterSpacing: 1.2, paddingHorizontal: 12, paddingTop: 9, paddingBottom: 5 }, menuDivider: { height: 1, backgroundColor: palette.line, marginVertical: 5 }, filterOption: { height: 42, borderRadius: 10, paddingHorizontal: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }, filterOptionActive: { backgroundColor: palette.canvas }, filterOptionText: { color: palette.muted, fontSize: 12 }, filterOptionTextActive: { color: palette.ink, fontWeight: '700' }, check: { color: palette.olive, fontWeight: '700' },
+  grid: { zIndex: 1, flexDirection: 'row', flexWrap: 'wrap', gap: 14 }, card: { width: '48%', flexGrow: 1, maxWidth: 290, marginBottom: 10 }, imageWrap: { aspectRatio: 0.78, borderRadius: radii.card, overflow: 'hidden', backgroundColor: palette.canvas }, image: { width: '100%', height: '100%' }, numberBadge: { position: 'absolute', top: 10, left: 10, minWidth: 31, height: 25, borderRadius: 13, backgroundColor: '#FFFFFFE8', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 7 }, numberText: { color: palette.ink, fontSize: 9, fontWeight: '700', letterSpacing: 0.8 }, cardTitle: { color: palette.ink, fontSize: 15, fontWeight: '600', marginTop: 10 }, cardMeta: { color: palette.muted, fontSize: 9, fontWeight: '700', letterSpacing: 0.8, marginTop: 4 },
   empty: { alignItems: 'center', paddingVertical: 80 }, emptyTitle: { color: palette.ink, fontSize: 20, fontWeight: '600' }, emptyCopy: { color: palette.muted, fontSize: 13, lineHeight: 19, textAlign: 'center', marginTop: 8, maxWidth: 280 },
   preview: { flex: 1, backgroundColor: '#111' }, previewImage: { width: '100%', height: '100%' }, previewBack: { position: 'absolute', left: 20, height: 44, borderRadius: 22, backgroundColor: '#FFFFFF', paddingLeft: 12, paddingRight: 17, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5 }, previewBackArrow: { color: '#111', fontSize: 28, lineHeight: 31, marginTop: -2 }, previewBackText: { color: '#111', fontSize: 12, fontWeight: '700' }, previewDownload: { position: 'absolute', right: 20, height: 44, borderRadius: 22, backgroundColor: '#FFFFFF', paddingHorizontal: 15, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 }, previewDownloadDisabled: { opacity: 0.6 }, previewDownloadIcon: { color: '#111', fontSize: 22, lineHeight: 25 }, previewDownloadText: { color: '#111', fontSize: 12, fontWeight: '700' }, previewCaption: { position: 'absolute', left: 0, right: 0, bottom: 0, padding: 22, paddingTop: 55, backgroundColor: '#111A' }, previewTitle: { color: '#fff', fontSize: 24, fontWeight: '600', letterSpacing: -0.7, marginTop: 6 }, previewMeta: { color: '#C8C8C3', fontSize: 11, marginTop: 5 },
 });

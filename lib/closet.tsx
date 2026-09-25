@@ -5,7 +5,9 @@ import { Directory, File, Paths } from 'expo-file-system';
 import * as ImagePicker from 'expo-image-picker';
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, AppState, Linking, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
-import { palette } from '@/components/StyleoutUI';
+import { BrandMark, palette } from '@/components/StyleoutUI';
+import { ThemeColors, useStyleoutTheme } from '@/components/StyleoutTheme';
+import { useToast } from '@/components/Toast';
 import { createStyleoutClient, IMAGE_BUCKET } from '@/lib/supabase';
 
 export const CATEGORIES = ['Tops', 'Bottoms', 'Outerwear', 'Dresses', 'Shoes', 'Bags', 'Accessories'] as const;
@@ -73,7 +75,7 @@ type ClosetState = {
   queueStyleSelection: (selection: PendingStyleSelection) => void;
   clearPendingStyleSelection: () => void;
   saveLook: (title: string, selections: LookSelection[], pieces: string[], backgroundBlur?: boolean) => Promise<string>;
-  generateLook: (id: string, instructions?: string, backgroundBlur?: boolean) => Promise<void>;
+  generateLook: (id: string, instructions?: string, backgroundBlur?: boolean, regenerate?: boolean) => Promise<void>;
   updateLookBackgroundBlur: (id: string, backgroundBlur: boolean) => Promise<void>;
   updateLookTitle: (id: string, title: string) => Promise<void>;
   removeLook: (id: string) => Promise<void>;
@@ -149,12 +151,17 @@ function message(error: unknown) { return error instanceof Error ? error.message
 
 type Client = NonNullable<ReturnType<typeof createStyleoutClient>>;
 function WardrobeLoadingScreen() {
+  const { colors: theme } = useStyleoutTheme();
   const [progress, setProgress] = useState(0);
   useEffect(() => {
     const timer = setInterval(() => setProgress((value) => Math.min(96, value + (value < 65 ? 2 : 1))), 42);
     return () => clearInterval(timer);
   }, []);
-  return <View style={styles.loadingScreen} accessibilityLabel={`Loading your wardrobe ${progress} percent`}><Text style={styles.loadingEyebrow}>STYLEOUT</Text><Text style={styles.loadingCopy}>Preparing your wardrobe</Text><Text style={styles.loadingProgress}>{progress}</Text></View>;
+  return <View style={[styles.loadingScreen, { backgroundColor: theme.paper }]} accessibilityLabel={`Loading your wardrobe ${progress} percent`}>
+    <View style={styles.loadingBrand}><BrandMark /><Text style={[styles.loadingWordmark, { color: theme.ink }]}>STYLEOUT</Text></View>
+    <View style={styles.loadingMessage}><View style={[styles.loadingAccent, { backgroundColor: theme.olive }]} /><Text style={[styles.loadingEyebrow, { color: theme.olive }]}>YOUR DIGITAL DRESSING ROOM</Text><Text style={[styles.loadingCopy, { color: theme.ink }]}>Putting your wardrobe in place</Text></View>
+    <View style={styles.loadingFooter}><Text style={[styles.loadingFootnote, { color: theme.muted }]}>GETTING YOUR FITTING ROOM READY</Text><View style={styles.loadingProgressRow}><Text style={[styles.loadingProgress, { color: theme.ink }]}>{progress}</Text><Text style={[styles.loadingPercent, { color: theme.olive }]}>%</Text></View><View style={[styles.loadingTrack, { backgroundColor: theme.line }]}><View style={[styles.loadingFill, { width: `${progress}%`, backgroundColor: theme.olive }]} /></View></View>
+  </View>;
 }
 
 async function signedImage(client: Client, path: string | null): Promise<string | null> {
@@ -173,6 +180,8 @@ async function uploadImage(client: Client, userId: string, uri: string, area: 'm
 }
 
 export function ClosetProvider({ children, userId }: { children: React.ReactNode; userId: string | null }) {
+  const { colors: theme } = useStyleoutTheme();
+  const { showToast } = useToast();
   const { getToken } = useAuth();
   const getTokenRef = useRef(getToken);
   getTokenRef.current = getToken;
@@ -191,6 +200,9 @@ export function ClosetProvider({ children, userId }: { children: React.ReactNode
   const [loadError, setLoadError] = useState<string | null>(null);
   const [wardrobeDraft, setWardrobeDraft] = useState<WardrobeDraft | null>(null);
   const [pendingStyleSelection, setPendingStyleSelection] = useState<PendingStyleSelection | null>(null);
+  const generationStatuses = useRef(new Map<string, SavedLook['generationStatus']>());
+
+  useEffect(() => { generationStatuses.current.clear(); }, [userId]);
 
   const refresh = useCallback(async () => {
     if (!client || !userId) return;
@@ -242,6 +254,12 @@ export function ClosetProvider({ children, userId }: { children: React.ReactNode
       linksByLook.set(link.look_id, group);
     }
     const loadedLooks: SavedLook[] = rawLooks.map((look) => ({ ...look, selections: linksByLook.get(look.id) || [] }));
+    for (const look of loadedLooks) {
+      const previousStatus = generationStatuses.current.get(look.id);
+      if (previousStatus === 'running' && look.generationStatus === 'complete') showToast(`${look.title} is ready in Saved Looks.`);
+      else if (previousStatus === 'running' && look.generationStatus === 'failed') showToast(look.generationError || `${look.title} could not be generated.`, 'error');
+      generationStatuses.current.set(look.id, look.generationStatus);
+    }
     setName(profile?.display_name || 'Your profile');
     setBio(profile?.bio || 'A wardrobe that feels like you.');
     setBodyPhotoPath(profile?.main_image_path || null);
@@ -252,7 +270,7 @@ export function ClosetProvider({ children, userId }: { children: React.ReactNode
     setSnapshotsAvailable(!snapshotProbe.error);
     setTitlesAvailable(!titleProbe.error);
     setLoadError(null);
-  }, [client, userId]);
+  }, [client, showToast, userId]);
 
   useEffect(() => {
     if (!userId || !client) { setReady(true); return; }
@@ -282,7 +300,7 @@ export function ClosetProvider({ children, userId }: { children: React.ReactNode
   }, [savedLooks, refresh]);
 
   if (!ready) return <WardrobeLoadingScreen />;
-  if (loadError || !client) return <View style={styles.center}><Text style={styles.heading}>{client ? 'Could not load your wardrobe' : 'Supabase setup needed'}</Text><Text style={styles.copy}>{loadError || 'Set EXPO_PUBLIC_SUPABASE_URL and EXPO_PUBLIC_SUPABASE_KEY in .env.local.'}</Text>{client && <Pressable onPress={() => { setReady(false); refresh().catch((error) => setLoadError(message(error))).finally(() => setReady(true)); }} style={styles.retry}><Text style={styles.retryText}>Try again</Text></Pressable>}</View>;
+  if (loadError || !client) return <View style={[styles.center, { backgroundColor: theme.paper }]}><Text style={[styles.heading, { color: theme.ink }]}>{client ? 'Could not load your wardrobe' : 'Supabase setup needed'}</Text><Text style={[styles.copy, { color: theme.muted }]}>{loadError || 'Set EXPO_PUBLIC_SUPABASE_URL and EXPO_PUBLIC_SUPABASE_KEY in .env.local.'}</Text>{client && <Pressable onPress={() => { setReady(false); refresh().catch((error) => setLoadError(message(error))).finally(() => setReady(true)); }} style={[styles.retry, { backgroundColor: theme.ink }]}><Text style={[styles.retryText, { color: theme.paper }]}>Try again</Text></Pressable>}</View>;
 
   const addItem = async (item: NewItem, sourceId?: string) => {
     if (!userId) throw new Error('Sign in to save your wardrobe.');
@@ -421,18 +439,22 @@ export function ClosetProvider({ children, userId }: { children: React.ReactNode
       }, ...current]);
       return String(data);
     },
-    generateLook: async (id, instructions = '', backgroundBlur = false) => {
+    generateLook: async (id, instructions = '', backgroundBlur = false, regenerate = false) => {
       const token = await getTokenRef.current();
       if (!token) throw new Error('Sign in to generate a look.');
       const { data, error } = await client.functions.invoke('generate-styleout-look', {
-        body: { lookId: id, instructions: instructions.trim(), backgroundBlur }, headers: { Authorization: `Bearer ${token}` },
+        body: { lookId: id, instructions: instructions.trim(), backgroundBlur, regenerate }, headers: { Authorization: `Bearer ${token}` },
       });
       if (error) {
         const response = 'context' in error ? error.context : null;
         const detail = response instanceof Response ? await response.json().catch(() => null) : null;
         throw new Error(detail?.error || 'Could not start image generation. Please try again.');
       }
-      if (data?.status === 'running') setSavedLooks((current) => current.map((look) => look.id === id ? { ...look, generationStatus: 'running', generationError: null, generationStartedAt: Date.now(), backgroundBlur } : look));
+      if (data?.status === 'running') {
+        generationStatuses.current.set(id, 'running');
+        setSavedLooks((current) => current.map((look) => look.id === id ? { ...look, generationStatus: 'running', generationError: null, generationStartedAt: Date.now(), backgroundBlur } : look));
+        showToast('AI look generation started.', 'info');
+      }
       else await refresh();
     },
     updateLookBackgroundBlur: async (id, backgroundBlur) => {
@@ -455,6 +477,7 @@ export function ClosetProvider({ children, userId }: { children: React.ReactNode
       const { error } = await client.from('saved_looks').delete().eq('id', id).eq('user_id', userId);
       if (error) throw error;
       setSavedLooks((current) => current.filter((look) => look.id !== id));
+      generationStatuses.current.delete(id);
       if (generatedPath) await client.storage.from(IMAGE_BUCKET).remove([generatedPath]);
     },
     importPreviousWardrobe: async () => {
@@ -500,6 +523,7 @@ export function ClosetProvider({ children, userId }: { children: React.ReactNode
       await AsyncStorage.setItem(`styleout.imported.${userId}`, 'true');
       setPreviousWardrobeAvailable(false);
       await refresh();
+      showToast('Your previous wardrobe is now in your account.');
     },
   };
   return <ClosetContext.Provider value={value}>{children}</ClosetContext.Provider>;
@@ -512,7 +536,10 @@ export function useCloset() {
 }
 
 const styles = StyleSheet.create({
-  loadingScreen: { flex: 1, backgroundColor: '#151515', paddingHorizontal: 24, paddingTop: 24 }, loadingEyebrow: { color: '#fff', fontSize: 12, fontWeight: '700', letterSpacing: 2 }, loadingCopy: { color: '#AAA9A3', fontSize: 13, marginTop: 10 }, loadingProgress: { position: 'absolute', right: 24, bottom: 18, color: '#fff', fontSize: 104, lineHeight: 112, fontWeight: '800', letterSpacing: -5 },
+  loadingScreen: { flex: 1, backgroundColor: palette.paper, paddingHorizontal: 24, paddingTop: 24, paddingBottom: 24, justifyContent: 'space-between' },
+  loadingBrand: { flexDirection: 'row', alignItems: 'center', gap: 10 }, loadingWordmark: { color: palette.ink, fontSize: 11, fontWeight: '800', letterSpacing: 2.2 },
+  loadingMessage: { marginTop: 'auto', marginBottom: 'auto' }, loadingAccent: { width: 34, height: 3, borderRadius: 2, backgroundColor: palette.olive, marginBottom: 18 }, loadingEyebrow: { color: palette.olive, fontSize: 10, fontWeight: '700', letterSpacing: 1.7 }, loadingCopy: { color: palette.ink, fontSize: 20, fontWeight: '600', letterSpacing: -0.5, marginTop: 8 },
+  loadingFooter: { position: 'relative', minHeight: 126, justifyContent: 'flex-end' }, loadingFootnote: { color: palette.muted, fontSize: 9, fontWeight: '700', letterSpacing: 1.4, marginBottom: 7 }, loadingProgressRow: { flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'flex-end' }, loadingProgress: { color: palette.ink, fontSize: 82, lineHeight: 86, fontWeight: '800', letterSpacing: -5 }, loadingPercent: { color: palette.olive, fontSize: 22, lineHeight: 33, fontWeight: '700', marginLeft: 2, marginBottom: 7 }, loadingTrack: { height: 3, borderRadius: 2, overflow: 'hidden', backgroundColor: palette.line, marginTop: 10 }, loadingFill: { height: 3, backgroundColor: palette.olive },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 30, backgroundColor: palette.paper },
   heading: { fontSize: 23, color: palette.ink, fontWeight: '600', textAlign: 'center' },
   copy: { marginTop: 12, color: palette.muted, textAlign: 'center', lineHeight: 20 },

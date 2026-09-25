@@ -5,7 +5,9 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LoadingImage } from '@/components/LoadingImage';
-import { palette, SmallCaps } from '@/components/StyleoutUI';
+import { SmallCaps } from '@/components/StyleoutUI';
+import { ThemeColors, useStyleoutTheme } from '@/components/StyleoutTheme';
+import { useToast } from '@/components/Toast';
 import { useCloset } from '@/lib/closet';
 import { createStyleoutClient } from '@/lib/supabase';
 
@@ -29,6 +31,9 @@ async function functionMessage(error: unknown, fallback: string) {
 }
 
 export function InstagramImport() {
+  const { colors: palette } = useStyleoutTheme();
+  const { showToast } = useToast();
+  const s = useMemo(() => makeStyles(palette), [palette]);
   const { getToken } = useAuth();
   const getTokenRef = useRef(getToken);
   getTokenRef.current = getToken;
@@ -140,7 +145,7 @@ export function InstagramImport() {
       await refreshCloset();
       setPickerOpen(false);
       setSelected([]);
-      Alert.alert('Photos imported', `${data?.imported || selected.length} Instagram ${selected.length === 1 ? 'photo is' : 'photos are'} now available in your Styleout photos.`);
+      showToast(`${data?.imported || selected.length} Instagram ${selected.length === 1 ? 'photo added' : 'photos added'} to your Styleout photos.`);
     } catch (importError) {
       setError(importError instanceof Error ? importError.message : 'These photos could not be imported.');
     } finally {
@@ -200,7 +205,7 @@ export function InstagramImport() {
   </>;
 }
 
-const s = StyleSheet.create({
+const makeStyles = (palette: ThemeColors) => StyleSheet.create({
   card: { marginHorizontal: 24, marginTop: 24, borderRadius: 22, backgroundColor: '#171714', padding: 20, overflow: 'hidden' },
   cardTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 },
   crown: { width: 42, height: 42, borderRadius: 14, alignItems: 'center', justifyContent: 'center', backgroundColor: '#E7D39B' },
@@ -212,7 +217,7 @@ const s = StyleSheet.create({
   copy: { color: '#A9A79E', fontSize: 12, lineHeight: 18, marginTop: 9, maxWidth: 360 },
   connectButton: { height: 52, borderRadius: 16, backgroundColor: '#F5F4EF', marginTop: 20, paddingHorizontal: 17, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   connectText: { color: '#171714', fontSize: 13, fontWeight: '700' }, connectArrow: { color: '#171714', fontSize: 18 }, pressed: { opacity: 0.84 }, disabled: { opacity: 0.48 },
-  modal: { flex: 1, backgroundColor: '#fff' }, modalHeader: { paddingHorizontal: 20, paddingBottom: 16, flexDirection: 'row', alignItems: 'flex-start', borderBottomWidth: 1, borderBottomColor: palette.line },
+  modal: { flex: 1, backgroundColor: palette.paper }, modalHeader: { paddingHorizontal: 20, paddingBottom: 16, flexDirection: 'row', alignItems: 'flex-start', borderBottomWidth: 1, borderBottomColor: palette.line },
   modalTitle: { color: palette.ink, fontSize: 28, fontWeight: '600', letterSpacing: -0.8, marginTop: 6 }, modalSubtitle: { color: palette.muted, fontSize: 11, marginTop: 5 },
   closeButton: { width: 42, height: 42, borderRadius: 15, backgroundColor: palette.canvas, alignItems: 'center', justifyContent: 'center' }, closeText: { color: palette.ink, fontSize: 29, lineHeight: 31 },
   mediaGrid: { padding: 14, paddingBottom: 28, flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
@@ -223,5 +228,5 @@ const s = StyleSheet.create({
   empty: { width: '100%', minHeight: 260, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 30 }, emptyTitle: { color: palette.ink, fontSize: 19, fontWeight: '600' }, emptyCopy: { color: palette.muted, fontSize: 12, lineHeight: 18, textAlign: 'center', marginTop: 7 },
   errorBox: { width: '100%', minHeight: 180, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 30 }, errorText: { color: '#9E534A', fontSize: 12, lineHeight: 18, textAlign: 'center' }, retryText: { color: palette.olive, fontSize: 12, fontWeight: '700', marginTop: 12 },
   loadingText: { width: '100%', textAlign: 'center', color: palette.muted, fontSize: 12, paddingVertical: 35 }, moreButton: { width: '100%', height: 48, borderWidth: 1, borderColor: palette.line, borderRadius: 14, alignItems: 'center', justifyContent: 'center', marginTop: 4 }, moreText: { color: palette.ink, fontSize: 12, fontWeight: '700' },
-  footer: { borderTopWidth: 1, borderTopColor: palette.line, paddingHorizontal: 20, paddingTop: 14, backgroundColor: '#fff' }, footerNote: { color: palette.muted, fontSize: 10, textAlign: 'center', marginBottom: 10 }, importButton: { height: 52, borderRadius: 16, backgroundColor: palette.ink, alignItems: 'center', justifyContent: 'center' }, importText: { color: '#fff', fontSize: 13, fontWeight: '700' },
+  footer: { borderTopWidth: 1, borderTopColor: palette.line, paddingHorizontal: 20, paddingTop: 14, backgroundColor: palette.paper }, footerNote: { color: palette.muted, fontSize: 10, textAlign: 'center', marginBottom: 10 }, importButton: { height: 52, borderRadius: 16, backgroundColor: palette.ink, alignItems: 'center', justifyContent: 'center' }, importText: { color: palette.paper, fontSize: 13, fontWeight: '700' },
 });
