@@ -3,7 +3,14 @@ import { createGateway, generateImage } from 'npm:ai@6';
 
 const headers = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, apikey, content-type, x-client-info', 'Access-Control-Allow-Methods': 'POST, OPTIONS', 'Content-Type': 'application/json' };
 const bucket = 'styleout-images';
-const model = 'spacexai/grok-imagine-image';
+const defaultModel = 'spacexai/grok-imagine-image';
+const allowedModels = new Set([
+  defaultModel,
+  'spacexai/grok-imagine-image-2.0',
+  'bfl/flux-kontext-pro',
+  'openai/gpt-image-2.5-flare',
+  'openai/gpt-image-2.5-sunburst',
+]);
 const reply = (status, payload) => new Response(JSON.stringify(payload), { status, headers });
 const validId = (value) => typeof value === 'string' && /^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(value);
 
@@ -67,7 +74,7 @@ EDIT BOUNDARY: change only the pixels necessary to dress the person in the selec
 Do not add garments, accessories, jewelry, tattoos, makeup, hair, body parts or people. Do not alter exposed skin. Do not create text, labels, prices, a collage or a product catalog.${layeringRequest}${backgroundRequest}${userRequest}\n\nOutput one vertical full-length photo. Before output, verify that the face, identity, skin and body match Image 1 and that only the requested wardrobe pieces changed.`;
 }
 
-async function runGeneration(admin, look, items, key, additionalInstructions, backgroundBlur) {
+async function runGeneration(admin, look, items, key, additionalInstructions, backgroundBlur, model) {
   try {
     const paths = [look.image_path, ...items.map((item) => item.item_image_path)];
     const images = await Promise.all(paths.map((path) => downloadImage(admin, path)));
@@ -77,13 +84,14 @@ async function runGeneration(admin, look, items, key, additionalInstructions, ba
     const gateway = createGateway({ apiKey: key });
     let result;
     try {
+      const openAiImageModel = model.startsWith('openai/');
       result = await generateImage({
         model: gateway.imageModel(model),
         prompt: {
           text: promptFor(items, additionalInstructions, backgroundBlur),
           images: await Promise.all(images.map(async ({ data }) => new Uint8Array(await data.arrayBuffer()))),
         },
-        aspectRatio: '2:3',
+        ...(openAiImageModel ? { size: '1024x1536' } : { aspectRatio: '2:3' }),
         abortSignal: AbortSignal.timeout(130000),
         maxRetries: 0,
       });
@@ -133,7 +141,9 @@ Deno.serve(async (request) => {
   if (request.method !== 'POST') return reply(405, { error: 'POST required.' });
   const authorization = request.headers.get('Authorization');
   if (!authorization?.startsWith('Bearer ')) return reply(401, { error: 'Sign in to generate a look.' });
-  const { lookId, instructions, backgroundBlur: requestedBackgroundBlur, regenerate: requestedRegenerate } = await request.json().catch(() => ({}));
+  const { lookId, instructions, backgroundBlur: requestedBackgroundBlur, regenerate: requestedRegenerate, model: requestedModel } = await request.json().catch(() => ({}));
+  const model = typeof requestedModel === 'string' ? requestedModel : defaultModel;
+  if (!allowedModels.has(model)) return reply(400, { error: 'Choose a supported image generation model.' });
   const backgroundBlur = requestedBackgroundBlur === true;
   const forceRegenerate = requestedRegenerate === true;
   const additionalInstructions = typeof instructions === 'string'
@@ -182,6 +192,6 @@ Deno.serve(async (request) => {
   const { data: claimed, error: claimError } = await claim.select('id').maybeSingle();
   if (claimError) return reply(500, { error: 'Could not start image generation.' });
   if (!claimed) return reply(202, { status: 'running' });
-  EdgeRuntime.waitUntil(runGeneration(admin, look, describedItems, key, additionalInstructions, backgroundBlur));
+  EdgeRuntime.waitUntil(runGeneration(admin, look, describedItems, key, additionalInstructions, backgroundBlur, model));
   return reply(202, { status: 'running' });
 });

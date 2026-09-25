@@ -13,3 +13,7 @@ entrypoint = './functions/instagram-oauth-callback/index.js'
 [functions.instagram-media]
 verify_jwt = false
 entrypoint = './functions/instagram-media/index.js'
+
+[functions.delete-styleout-account]
+verify_jwt = false
+entrypoint = './functions/delete-styleout-account/index.js'

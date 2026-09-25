@@ -87,6 +87,7 @@ This is what modern React Native architecture looks like when you stop cutting c
    Then run [the saved-look SQL](supabase/migrations/20260920000000_saved_look_items.sql). This has also been run in the supplied Styleout project.
    Then run [the style-name and item-snapshot migration](supabase/migrations/20260920010000_style_names_and_item_snapshots.sql) to keep each saved style's name and original wardrobe details. This has also been run in the supplied Styleout project.
    Then run [the AI look status migration](supabase/migrations/20260920020000_ai_looks.sql). This has also been run in the supplied Styleout project.
+   Run [the onboarding migration](supabase/migrations/20260925000000_profile_onboarding.sql) so the first-login tutorial is remembered across devices. It marks accounts that predate the tutorial as complete, so existing users are not interrupted.
 4. Run `npm install` and `npm run start`, then open the project in Expo Go on your iPhone.
 
 The native bundle ID and Android package in `app.json` are `com.styleout.app`. Register those identifiers in Clerk's Native applications settings before making a standalone build. Expo Go uses its own development callback.
@@ -115,3 +116,7 @@ Apply [the Instagram migration](supabase/migrations/20260921000000_instagram_imp
 - `STYLEOUT_WEB_URL`: the deployed web origin. Localhost and the `styleout://` native scheme are already accepted.
 
 Add the exact callback URL to the Meta app's Instagram Login OAuth settings and request `instagram_business_basic`. The user must have an Instagram Creator or Business account; a Facebook Page is not required. App roles can test while the Meta app is in development mode; public users require the relevant Meta review and live-mode configuration.
+
+## Account deletion
+
+Profile includes a permanent account deletion flow. It removes the user's Styleout database rows, their files from the private image bucket, their Instagram connection, and their Clerk login. Before deploying `delete-styleout-account`, add the matching Clerk environment's `CLERK_SECRET_KEY` (server-side `sk_test_...` or `sk_live_...`) under **Supabase → Edge Functions → Secrets**, then deploy the function. Never add this secret to the Expo app or commit it. The user must type `DELETE` in the confirmation dialog to proceed.

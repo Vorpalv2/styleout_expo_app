@@ -9,6 +9,7 @@ import { BrandMark, palette } from '@/components/StyleoutUI';
 import { ThemeColors, useStyleoutTheme } from '@/components/StyleoutTheme';
 import { useToast } from '@/components/Toast';
 import { createStyleoutClient, IMAGE_BUCKET } from '@/lib/supabase';
+import { DEFAULT_IMAGE_GENERATION_MODEL, ImageGenerationModel, isImageGenerationModel } from '@/lib/imageModels';
 
 export const CATEGORIES = ['Tops', 'Bottoms', 'Outerwear', 'Dresses', 'Shoes', 'Bags', 'Accessories'] as const;
 export type Category = (typeof CATEGORIES)[number];
@@ -52,6 +53,11 @@ function titleFromPieces(pieces: string[] | null) { return pieces?.[0]?.startsWi
 function cleanPieces(pieces: string[] | null) { return titleFromPieces(pieces) ? (pieces || []).slice(1) : pieces || []; }
 type ClosetState = {
   items: ClosetItem[];
+  onboardingLoaded: boolean;
+  onboardingComplete: boolean;
+  onboardingReplayRequested: boolean;
+  completeOnboarding: () => Promise<void>;
+  replayOnboarding: () => Promise<void>;
   name: string;
   bio: string;
   bodyPhoto: string | null;
@@ -76,9 +82,12 @@ type ClosetState = {
   clearPendingStyleSelection: () => void;
   saveLook: (title: string, selections: LookSelection[], pieces: string[], backgroundBlur?: boolean) => Promise<string>;
   generateLook: (id: string, instructions?: string, backgroundBlur?: boolean, regenerate?: boolean) => Promise<void>;
+  imageGenerationModel: ImageGenerationModel;
+  setImageGenerationModel: (model: ImageGenerationModel) => void;
   updateLookBackgroundBlur: (id: string, backgroundBlur: boolean) => Promise<void>;
   updateLookTitle: (id: string, title: string) => Promise<void>;
   removeLook: (id: string) => Promise<void>;
+  deleteAccount: () => Promise<void>;
 };
 const ClosetContext = createContext<ClosetState | null>(null);
 
@@ -193,6 +202,11 @@ export function ClosetProvider({ children, userId }: { children: React.ReactNode
   const [bodyPhotoPath, setBodyPhotoPath] = useState<string | null>(null);
   const [mainPhotos, setMainPhotos] = useState<MainPhoto[]>([]);
   const [savedLooks, setSavedLooks] = useState<SavedLook[]>([]);
+  const [imageGenerationModel, setImageGenerationModelState] = useState<ImageGenerationModel>(DEFAULT_IMAGE_GENERATION_MODEL);
+  const [onboardingLoaded, setOnboardingLoaded] = useState(false);
+  const [onboardingComplete, setOnboardingCompleteState] = useState(true);
+  const [onboardingReplayRequested, setOnboardingReplayRequested] = useState(false);
+  const onboardingUserRef = useRef<string | null>(null);
   const [snapshotsAvailable, setSnapshotsAvailable] = useState(false);
   const [titlesAvailable, setTitlesAvailable] = useState(false);
   const [previousWardrobeAvailable, setPreviousWardrobeAvailable] = useState(false);
@@ -204,6 +218,38 @@ export function ClosetProvider({ children, userId }: { children: React.ReactNode
   const pendingGenerationToasts = useRef<Array<{ message: string; tone: 'success' | 'error' }>>([]);
 
   useEffect(() => {
+    onboardingUserRef.current = null;
+    setOnboardingLoaded(!userId);
+    setOnboardingCompleteState(!userId);
+    setOnboardingReplayRequested(false);
+  }, [userId]);
+
+  const completeOnboarding = useCallback(async () => {
+    setOnboardingCompleteState(true);
+    setOnboardingReplayRequested(false);
+    setOnboardingLoaded(true);
+    if (!userId) return;
+    await Promise.all([
+      AsyncStorage.setItem(`styleout.onboarding.v1.${userId}`, 'complete').catch(() => {}),
+      client?.from('styleout_profiles').upsert({ user_id: userId, onboarding_completed_at: new Date().toISOString(), updated_at: new Date().toISOString() }, { onConflict: 'user_id' }).then(() => {}, () => {}),
+    ]);
+  }, [client, userId]);
+  const replayOnboarding = useCallback(async () => {
+    setOnboardingCompleteState(false);
+    setOnboardingReplayRequested(true);
+    setOnboardingLoaded(true);
+  }, []);
+
+  useEffect(() => {
+    if (!userId) return;
+    let active = true;
+    AsyncStorage.getItem(`styleout.imageModel.${userId}`).then((stored) => {
+      if (active && isImageGenerationModel(stored)) setImageGenerationModelState(stored);
+    }).catch(() => {});
+    return () => { active = false; };
+  }, [userId]);
+
+  useEffect(() => {
     generationStatuses.current.clear();
     pendingGenerationToasts.current = [];
     return clearPersistentToast;
@@ -211,19 +257,28 @@ export function ClosetProvider({ children, userId }: { children: React.ReactNode
 
   const refresh = useCallback(async () => {
     if (!client || !userId) return;
-    const [profileResult, itemResult, lookResult, linkResult, snapshotProbe, titleProbe] = await Promise.all([
+    const [profileResult, itemResult, lookResult, linkResult, snapshotProbe, titleProbe, onboardingResult] = await Promise.all([
       client.from('styleout_profiles').select('display_name,bio,main_image_path').eq('user_id', userId).maybeSingle(),
       client.from('wardrobe_items').select('id,image_path,name,category,color,brand,notes').eq('user_id', userId).order('created_at', { ascending: false }),
       client.from('saved_looks').select('*').eq('user_id', userId).order('saved_at', { ascending: false }),
       client.from('saved_look_items').select('*').eq('user_id', userId).order('slot_index', { ascending: true }),
       client.from('saved_look_items').select('item_image_path').limit(0),
       client.from('saved_looks').select('title').limit(0),
+      client.from('styleout_profiles').select('onboarding_completed_at').eq('user_id', userId).maybeSingle(),
     ]);
     if (profileResult.error) throw profileResult.error;
     if (itemResult.error) throw itemResult.error;
     if (lookResult.error) throw lookResult.error;
     if (linkResult.error) throw linkResult.error;
     const profile = profileResult.data;
+    if (onboardingUserRef.current !== userId) {
+      const localState = await AsyncStorage.getItem(`styleout.onboarding.v1.${userId}`).catch(() => null);
+      const complete = onboardingResult.error ? localState !== null : !!onboardingResult.data?.onboarding_completed_at;
+      onboardingUserRef.current = userId;
+      setOnboardingCompleteState(complete);
+      setOnboardingReplayRequested(false);
+      setOnboardingLoaded(true);
+    }
     const itemRows = itemResult.data || [];
     const lookRows = lookResult.data || [];
     const [mainUrl, loadedItems, rawLooks, mainPhotoRows] = await Promise.all([
@@ -334,6 +389,7 @@ export function ClosetProvider({ children, userId }: { children: React.ReactNode
   };
   const value: ClosetState = {
     items, name, bio, bodyPhoto, bodyPhotoPath, mainPhotos, savedLooks, previousWardrobeAvailable,
+    onboardingLoaded, onboardingComplete, onboardingReplayRequested, completeOnboarding, replayOnboarding,
     refreshCloset: refresh,
     wardrobeDraft,
     beginWardrobeDraft: setWardrobeDraft,
@@ -455,11 +511,16 @@ export function ClosetProvider({ children, userId }: { children: React.ReactNode
       }, ...current]);
       return String(data);
     },
+    imageGenerationModel,
+    setImageGenerationModel: (model) => {
+      setImageGenerationModelState(model);
+      if (userId) AsyncStorage.setItem(`styleout.imageModel.${userId}`, model).catch(() => {});
+    },
     generateLook: async (id, instructions = '', backgroundBlur = false, regenerate = false) => {
       const token = await getTokenRef.current();
       if (!token) throw new Error('Sign in to generate a look.');
       const { data, error } = await client.functions.invoke('generate-styleout-look', {
-        body: { lookId: id, instructions: instructions.trim(), backgroundBlur, regenerate }, headers: { Authorization: `Bearer ${token}` },
+        body: { lookId: id, instructions: instructions.trim(), backgroundBlur, regenerate, model: imageGenerationModel }, headers: { Authorization: `Bearer ${token}` },
       });
       if (error) {
         const response = 'context' in error ? error.context : null;
@@ -495,6 +556,31 @@ export function ClosetProvider({ children, userId }: { children: React.ReactNode
       setSavedLooks((current) => current.filter((look) => look.id !== id));
       generationStatuses.current.delete(id);
       if (generatedPath) await client.storage.from(IMAGE_BUCKET).remove([generatedPath]);
+    },
+    deleteAccount: async () => {
+      if (!client || !userId) throw new Error('Sign in to delete your account.');
+      const token = await getTokenRef.current();
+      if (!token) throw new Error('Your session expired. Sign in again and retry account deletion.');
+      const { error } = await client.functions.invoke('delete-styleout-account', {
+        body: {},
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (error) {
+        let detail = error.message || 'Could not delete your account. Please try again.';
+        const response = 'context' in error && error.context instanceof Response ? error.context : null;
+        if (response) {
+          const payload = await response.json().catch(() => ({}));
+          if (typeof payload.error === 'string') detail = payload.error;
+        }
+        throw new Error(detail);
+      }
+      await Promise.all([
+        AsyncStorage.removeItem(`styleout.onboarding.v1.${userId}`).catch(() => {}),
+        AsyncStorage.removeItem(`styleout.imageModel.${userId}`).catch(() => {}),
+        AsyncStorage.removeItem(`styleout.v2.${userId}`).catch(() => {}),
+        AsyncStorage.removeItem(`styleout.imported.${userId}`).catch(() => {}),
+        AsyncStorage.removeItem('styleout.v1').catch(() => {}),
+      ]);
     },
     importPreviousWardrobe: async () => {
       if (!userId) throw new Error('Sign in to import your wardrobe.');

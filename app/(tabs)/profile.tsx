@@ -1,7 +1,7 @@
 import { useClerk, useUser } from '@clerk/expo';
 import { useRouter, type Href } from 'expo-router';
 import { useMemo, useState } from 'react';
-import { Alert, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StatusBar, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Alert, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StatusBar, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ActionButton, AppHeader, radii, RoundAction, SmallCaps } from '@/components/StyleoutUI';
 import { ThemeColors, ThemePreference, useStyleoutTheme } from '@/components/StyleoutTheme';
@@ -23,7 +23,7 @@ export default function ProfileScreen() {
   const { user } = useUser();
   const insets = useSafeAreaInsets();
   const { signOut } = useClerk();
-  const { items, name, bio, bodyPhoto, savedLooks, generateLook, removeLook, previousWardrobeAvailable, importPreviousWardrobe, updateProfile } = useCloset();
+  const { items, name, bio, bodyPhoto, savedLooks, generateLook, removeLook, previousWardrobeAvailable, importPreviousWardrobe, updateProfile, replayOnboarding, deleteAccount } = useCloset();
   const [editing, setEditing] = useState(false);
   const [draftName, setDraftName] = useState(name);
   const [draftBio, setDraftBio] = useState(bio);
@@ -33,12 +33,19 @@ export default function ProfileScreen() {
   const [startingGeneration, setStartingGeneration] = useState(false);
   const [photoPickerOpen, setPhotoPickerOpen] = useState(false);
   const [wardrobeExpanded, setWardrobeExpanded] = useState(false);
+  const [deleteAccountOpen, setDeleteAccountOpen] = useState(false);
+  const [deleteConfirmation, setDeleteConfirmation] = useState('');
+  const [deletingAccount, setDeletingAccount] = useState(false);
   const openLook = selectedLook ? savedLooks.find((look) => look.id === selectedLook.id) || selectedLook : null;
   const fullscreenImage = openLook?.generatedImage || openLook?.image || null;
   const displayName = name === 'Your profile' ? (user?.fullName || user?.firstName || 'Your profile') : name;
 
   function beginEdit() { setDraftName(name); setDraftBio(bio); setEditing(true); }
   function changePhoto() { setPhotoPickerOpen(true); }
+  async function replayTour() {
+    await replayOnboarding();
+    router.navigate('/' as Href);
+  }
   async function saveProfile() {
     try { await updateProfile(draftName.trim() || 'Your profile', draftBio.trim() || 'A wardrobe that feels like you.'); setEditing(false); showToast('Profile updated.'); }
     catch { Alert.alert('Save failed', 'Your profile could not be updated. Please try again.'); }
@@ -48,6 +55,20 @@ export default function ProfileScreen() {
     setSigningOut(true);
     try { await signOut(); }
     catch { Alert.alert('Sign-out failed', 'Please try again.'); setSigningOut(false); }
+  }
+  async function permanentlyDeleteAccount() {
+    if (deleteConfirmation !== 'DELETE' || deletingAccount) return;
+    setDeletingAccount(true);
+    try {
+      await deleteAccount();
+      setDeleteAccountOpen(false);
+      await signOut().catch(() => {});
+      router.replace('/sign-in' as Href);
+    } catch (error) {
+      Alert.alert('Could not delete account', error instanceof Error ? error.message : 'Please try again.');
+    } finally {
+      setDeletingAccount(false);
+    }
   }
   async function bringPreviousWardrobe() {
     try { await importPreviousWardrobe(); }
@@ -88,6 +109,7 @@ export default function ProfileScreen() {
           <View style={s.statDivider} />
           <View style={s.stat}><Text style={s.statValue}>{savedLooks.length}</Text><Text style={s.statLabel}>SAVED LOOKS</Text></View>
         </View>
+        <Pressable onPress={replayTour} accessibilityRole="button" style={s.tourLink}><Text style={s.tourLinkIcon}>✦</Text><View style={{ flex: 1 }}><Text style={s.tourLinkTitle}>Take a quick tour</Text><Text style={s.tourLinkCopy}>See what you can do in Styleout</Text></View><Text style={s.tourLinkArrow}>↗</Text></Pressable>
         <View style={s.section}><SmallCaps>YOUR STYLE PROFILE</SmallCaps><Text style={s.sectionTitle}>A look that's yours.</Text>
           <View style={s.styleCard}>
             <LoadingImage source={bodyPhoto ? { uri: bodyPhoto } : lookImage} style={s.styleImage} />
@@ -101,7 +123,7 @@ export default function ProfileScreen() {
           {wardrobeExpanded ? CATEGORIES.map((category) => { const categoryItems = items.filter((item) => item.category === category); return <View key={category} style={s.categoryBlock}><View style={s.categoryRow}><Text style={s.categoryName}>{category}</Text><Text style={s.categoryCount}>{categoryItems.length} {categoryItems.length === 1 ? 'piece' : 'pieces'}</Text></View>{categoryItems.length ? <View style={s.categoryItems}>{categoryItems.map((item) => <Text key={item.id} style={s.categoryItem}>{item.name}</Text>)}</View> : <Text style={s.categoryEmpty}>No pieces added yet.</Text>}</View>; }) : <Text style={s.categoryHint}>{items.length ? `${items.length} pieces across ${new Set(items.map((item) => item.category)).size} categories` : 'Tap to see your wardrobe categories.'}</Text>}
         </View>
         <View style={s.appearance}><SmallCaps>APPEARANCE</SmallCaps><Text style={s.appearanceTitle}>Choose your theme</Text><Text style={s.appearanceHint}>Use your device setting or pick a look for Styleout.</Text><View style={s.themeChoices}>{(['system', 'light', 'dark'] as ThemePreference[]).map((option) => <Pressable key={option} accessibilityRole="button" accessibilityState={{ selected: preference === option }} onPress={() => { void setPreference(option); }} style={[s.themeChoice, preference === option && s.themeChoiceActive]}><Text style={[s.themeChoiceText, preference === option && s.themeChoiceTextActive]}>{option === 'system' ? 'System' : option === 'light' ? 'Light' : 'Dark'}</Text></Pressable>)}</View><Text style={s.themeState}>{isDark ? 'Dark appearance is on' : 'Light appearance is on'}</Text></View>
-        <View style={s.account}><SmallCaps>ACCOUNT</SmallCaps><Text style={s.accountEmail}>{user?.primaryEmailAddress?.emailAddress || 'Signed in with Clerk'}</Text><Pressable onPress={leaveAccount} disabled={signingOut} style={s.signOut}><Text style={s.signOutText}>{signingOut ? 'Signing out…' : 'Sign out'}</Text><Text style={s.signOutText}>↗</Text></Pressable></View>
+        <View style={s.account}><SmallCaps>ACCOUNT</SmallCaps><Text style={s.accountEmail}>{user?.primaryEmailAddress?.emailAddress || 'Signed in with Clerk'}</Text><Pressable onPress={leaveAccount} disabled={signingOut} style={s.signOut}><Text style={s.signOutText}>{signingOut ? 'Signing out…' : 'Sign out'}</Text><Text style={s.signOutText}>↗</Text></Pressable><Pressable onPress={() => { setDeleteConfirmation(''); setDeleteAccountOpen(true); }} accessibilityRole="button" style={s.deleteAccountButton}><Text style={s.deleteAccountText}>Delete account</Text></Pressable></View>
       </ScrollView>
       <Modal visible={editing} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setEditing(false)}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={s.formScreen}><ScrollView contentContainerStyle={s.formContent}>
@@ -137,6 +159,23 @@ export default function ProfileScreen() {
         </View> : null}
         </View>
       </Modal>
+      <Modal visible={deleteAccountOpen} transparent animationType="fade" onRequestClose={() => { if (!deletingAccount) setDeleteAccountOpen(false); }}>
+        <Pressable style={s.deleteBackdrop} onPress={() => { if (!deletingAccount) setDeleteAccountOpen(false); }} accessibilityLabel="Close delete account confirmation">
+          <Pressable style={s.deleteCard} onPress={(event) => event.stopPropagation()}>
+            <SmallCaps>PERMANENT ACTION</SmallCaps>
+            <Text style={s.deleteTitle}>Delete your account?</Text>
+            <Text style={s.deleteCopy}>This permanently removes your Styleout profile, wardrobe, saved looks, uploaded images, Instagram connection, and Clerk login. This cannot be undone.</Text>
+            <Text style={s.deletePrompt}>Type DELETE to confirm</Text>
+            <TextInput value={deleteConfirmation} onChangeText={setDeleteConfirmation} autoCapitalize="characters" autoCorrect={false} editable={!deletingAccount} placeholder="DELETE" placeholderTextColor={palette.muted} style={s.deleteInput} accessibilityLabel="Type DELETE to confirm account deletion" />
+            <View style={s.deleteActions}>
+              <Pressable onPress={() => setDeleteAccountOpen(false)} disabled={deletingAccount} style={s.cancelDelete}><Text style={s.cancelDeleteText}>Cancel</Text></Pressable>
+              <Pressable onPress={permanentlyDeleteAccount} disabled={deleteConfirmation !== 'DELETE' || deletingAccount} accessibilityRole="button" style={[s.confirmDelete, (deleteConfirmation !== 'DELETE' || deletingAccount) && s.confirmDeleteDisabled]}>
+                {deletingAccount ? <ActivityIndicator color="#fff" /> : <Text style={s.confirmDeleteText}>Delete permanently</Text>}
+              </Pressable>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
       <PicChangeCarousel visible={photoPickerOpen} onClose={() => setPhotoPickerOpen(false)} />
     </View>
   );
@@ -144,6 +183,9 @@ export default function ProfileScreen() {
 
 const makeStyles = (palette: ThemeColors) => StyleSheet.create({
   screen: { flex: 1, backgroundColor: palette.paper }, editIcon: { fontSize: 23, color: palette.ink },
+  tourLink: { marginHorizontal: 24, marginTop: 17, borderRadius: 16, borderWidth: 1, borderColor: palette.line, backgroundColor: palette.surface, paddingHorizontal: 15, paddingVertical: 13, flexDirection: 'row', alignItems: 'center', gap: 12 }, tourLinkIcon: { color: palette.olive, fontSize: 20 }, tourLinkTitle: { color: palette.ink, fontSize: 13, fontWeight: '600' }, tourLinkCopy: { color: palette.muted, fontSize: 11, marginTop: 3 }, tourLinkArrow: { color: palette.olive, fontSize: 16 },
+  deleteAccountButton: { minHeight: 48, justifyContent: 'center', marginTop: 9 }, deleteAccountText: { color: palette.danger, fontSize: 13, fontWeight: '600' },
+  deleteBackdrop: { flex: 1, backgroundColor: '#0008', justifyContent: 'center', padding: 22 }, deleteCard: { width: '100%', maxWidth: 440, alignSelf: 'center', backgroundColor: palette.paper, borderRadius: 22, borderWidth: 1, borderColor: palette.line, padding: 23 }, deleteTitle: { fontSize: 23, fontWeight: '600', color: palette.ink, letterSpacing: -0.6, marginTop: 10 }, deleteCopy: { color: palette.muted, fontSize: 13, lineHeight: 20, marginTop: 9 }, deletePrompt: { color: palette.ink, fontSize: 12, fontWeight: '700', marginTop: 22, marginBottom: 8 }, deleteInput: { height: 48, paddingHorizontal: 13, borderRadius: 12, borderWidth: 1, borderColor: palette.line, color: palette.ink, backgroundColor: palette.surface, fontSize: 14, letterSpacing: 1 }, deleteActions: { flexDirection: 'row', gap: 10, marginTop: 18 }, cancelDelete: { flex: 1, height: 46, borderRadius: 12, backgroundColor: palette.canvas, alignItems: 'center', justifyContent: 'center' }, cancelDeleteText: { color: palette.ink, fontSize: 13, fontWeight: '600' }, confirmDelete: { flex: 1.5, height: 46, borderRadius: 12, backgroundColor: palette.danger, alignItems: 'center', justifyContent: 'center' }, confirmDeleteDisabled: { opacity: 0.45 }, confirmDeleteText: { color: '#fff', fontSize: 12, fontWeight: '700' },
   identity: { alignItems: 'center', paddingTop: 15, paddingHorizontal: 24 }, avatar: { width: 90, height: 90, borderRadius: 32, backgroundColor: palette.canvas, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }, avatarImage: { width: '100%', height: '100%' }, avatarLetter: { fontSize: 39, fontWeight: '500', color: palette.olive },
   name: { fontSize: 25, fontWeight: '600', color: palette.ink, marginTop: 16, letterSpacing: -0.7 }, bio: { color: palette.muted, fontSize: 13, marginTop: 7, textAlign: 'center' },
   editButton: { backgroundColor: palette.canvas, paddingHorizontal: 18, paddingVertical: 10, borderRadius: 12, marginTop: 17 }, editText: { fontSize: 12, color: palette.ink, fontWeight: '600' },

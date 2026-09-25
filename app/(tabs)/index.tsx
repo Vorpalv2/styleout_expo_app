@@ -1,6 +1,6 @@
-import { useRouter, type Href } from 'expo-router';
+import { useFocusEffect, useRouter, type Href } from 'expo-router';
 import { useClerk } from '@clerk/expo';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, KeyboardAvoidingView, Modal, PanResponder, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
 import { ActionButton, AppHeader, radii, RoundAction, samplePieces, SmallCaps } from '@/components/StyleoutUI';
 import { ThemeColors, useStyleoutTheme } from '@/components/StyleoutTheme';
@@ -8,7 +8,9 @@ import { LoadingImage } from '@/components/LoadingImage';
 import { PicChangeCarousel } from '@/components/PicChangeCarousel';
 import { ClosetRefreshControl } from '@/components/ClosetRefreshControl';
 import { useToast } from '@/components/Toast';
+import { OnboardingTour } from '@/components/OnboardingTour';
 import { ClosetItem, lookSignature, takePhoto, useCloset } from '@/lib/closet';
+import { IMAGE_GENERATION_MODELS } from '@/lib/imageModels';
 
 const lookImage = require('../../assets/styleout/look.png');
 type Styles = ReturnType<typeof makeStyles>;
@@ -32,12 +34,15 @@ export default function StyleScreen() {
   const { height } = useWindowDimensions();
   const { signOut } = useClerk();
   const { bodyPhoto, bodyPhotoPath, items, savedLooks, saveLook, generateLook, updateLookTitle,
-    updateLookBackgroundBlur, beginWardrobeDraft, pendingStyleSelection, clearPendingStyleSelection } = useCloset();
+    updateLookBackgroundBlur, beginWardrobeDraft, pendingStyleSelection, clearPendingStyleSelection,
+    imageGenerationModel, setImageGenerationModel, onboardingLoaded, onboardingComplete, onboardingReplayRequested, completeOnboarding } = useCloset();
   const [styleName, setStyleName] = useState('');
   const [active, setActive] = useState(1);
   const [swapOpen, setSwapOpen] = useState(false);
   const [photoPickerOpen, setPhotoPickerOpen] = useState(false);
   const [instructionOpen, setInstructionOpen] = useState(false);
+  const [modelPickerOpen, setModelPickerOpen] = useState(false);
+  const [tourVisible, setTourVisible] = useState(false);
   const [generationInstructions, setGenerationInstructions] = useState('');
   const [instructionDraft, setInstructionDraft] = useState('');
   const [backgroundBlur, setBackgroundBlur] = useState(false);
@@ -60,12 +65,17 @@ export default function StyleScreen() {
   const selectedCategories = selections.map(({ itemId }) => items.find((item) => item.id === itemId)?.category).filter((category): category is ClosetItem['category'] => !!category);
   const savedLook = savedLooks.find((look) => look.signature === lookSignature(bodyPhotoPath, selections));
   const generatedImage = savedLook?.generatedImage || null;
+  const selectedImageModel = IMAGE_GENERATION_MODELS.find((model) => model.id === imageGenerationModel) || IMAGE_GENERATION_MODELS[0];
   hasGeneratedRef.current = !!generatedImage;
   const generating = savedLook?.generationStatus === 'running' && (!savedLook.generationStartedAt || Date.now() - savedLook.generationStartedAt < 150000);
   const generateLabel = generatedImage ? 'Regenerate' : generating ? 'Generating' : saving ? 'Starting' : savedLook?.generationStatus === 'failed' || savedLook?.generationStatus === 'running' ? 'Retry' : 'Generate';
   const saveLabel = saving ? 'Saving' : savedLook && styleName.trim() !== savedLook.title ? 'Update' : savedLook ? 'Saved looks' : 'Save look';
   useEffect(() => { if (savedLook) { setStyleName(savedLook.title); setBackgroundBlur(savedLook.backgroundBlur); } }, [savedLook?.id]);
   useEffect(() => { setReveal(50); }, [generatedImage]);
+  useFocusEffect(useCallback(() => {
+    if (!onboardingLoaded || onboardingComplete) return;
+    setTourVisible(true);
+  }, [onboardingLoaded, onboardingComplete, onboardingReplayRequested]));
   const dividerPan = useMemo(() => PanResponder.create({
     onStartShouldSetPanResponder: () => hasGeneratedRef.current,
     onMoveShouldSetPanResponder: (_, gesture) => hasGeneratedRef.current && Math.abs(gesture.dx) > 2,
@@ -181,7 +191,12 @@ export default function StyleScreen() {
           })}
           <Pressable onPress={changePhoto} style={s.changePhoto}><Text style={s.changePhotoText}>↗  Change photo</Text></Pressable>
         </View>
-        <View style={s.details}>
+      <View style={s.details}>
+          <View style={s.modelPickerBlock}>
+            <Pressable accessibilityRole="button" accessibilityLabel={`Image model: ${selectedImageModel.name}. Choose a model.`} onPress={() => setModelPickerOpen(true)} style={({ pressed }) => [s.modelPicker, pressed && s.actionPressed]}>
+              <SmallCaps style={s.modelPickerLabel}>AI MODEL</SmallCaps><Text numberOfLines={1} style={s.modelPickerName}>{selectedImageModel.name}</Text><Text style={s.modelPickerChevron}>⌄</Text>
+            </Pressable>
+          </View>
           <View style={s.actionDock}>
             <Pressable accessibilityLabel="Add instructions for AI look generation" onPress={() => { setInstructionDraft(generationInstructions); setInstructionOpen(true); }} style={({ pressed }) => [s.actionItem, pressed && s.actionPressed]}>
               <View><Text style={[s.actionIcon, generationInstructions.trim() && s.actionActive]}>✎</Text>{generationInstructions.trim() ? <View style={s.actionDot} /> : null}</View>
@@ -206,6 +221,7 @@ export default function StyleScreen() {
           <Text style={s.helpText}>{savedLook?.generationStatus === 'failed' ? savedLook.generationError || 'Image generation failed. You can retry.' : savedLook?.generationStatus === 'running' && !generating ? 'Generation took too long. Tap Retry AI look.' : saveMessage || (!bodyPhotoPath ? 'Add your photo, then choose wardrobe pieces to save a style.' : !selections.length ? 'Swap in at least one piece from your wardrobe to save this style.' : selections.length > 2 ? 'You can save all selected pieces, but AI accepts your photo plus two garments. For a layered try-on, keep your Top and Outerwear selected and clear another piece.' : selectedCategories.includes('Tops') && selectedCategories.includes('Outerwear') ? 'Your AI try-on will layer the selected top under your outerwear.' : `${selections.length} ${selections.length === 1 ? 'piece' : 'pieces'} selected. AI generation uses your photo plus up to two selected wardrobe pieces.`)}</Text>
         </View>
       </ScrollView>
+      <OnboardingTour visible={tourVisible} onFinish={() => { setTourVisible(false); void completeOnboarding(); }} />
       <Modal visible={swapOpen} transparent animationType="slide" onRequestClose={() => setSwapOpen(false)}>
         <Pressable style={s.backdrop} onPress={() => setSwapOpen(false)} accessibilityLabel="Close wardrobe picker">
           <Pressable style={s.modal} onPress={(event) => event.stopPropagation()}>
@@ -238,6 +254,25 @@ export default function StyleScreen() {
           </KeyboardAvoidingView>
         </Pressable>
       </Modal>
+      <Modal visible={modelPickerOpen} transparent animationType="slide" onRequestClose={() => setModelPickerOpen(false)}>
+        <Pressable style={s.modelBackdrop} onPress={() => setModelPickerOpen(false)} accessibilityLabel="Close image model picker">
+          <Pressable style={s.modelSheet} onPress={(event) => event.stopPropagation()}>
+            <View style={s.handle} />
+            <View style={s.modalHeader}><View><SmallCaps>AI GATEWAY</SmallCaps><Text style={s.modalTitle}>Choose a model</Text></View><Pressable onPress={() => setModelPickerOpen(false)} accessibilityLabel="Close model picker"><Text style={s.close}>×</Text></Pressable></View>
+            <Text style={s.modelPickerDescription}>Each generation uses your Vercel AI Gateway credits. Rates vary by model.</Text>
+            <ScrollView style={s.modelList} showsVerticalScrollIndicator={false}>
+              {IMAGE_GENERATION_MODELS.map((model) => {
+                const selected = imageGenerationModel === model.id;
+                return <Pressable key={model.id} accessibilityRole="radio" accessibilityState={{ checked: selected }} onPress={() => { setImageGenerationModel(model.id); setModelPickerOpen(false); }} style={[s.modelOption, selected && s.modelOptionSelected]}>
+                  <View style={{ flex: 1 }}><Text style={s.modelOptionName}>{model.name}</Text><Text style={s.modelOptionDetail}>{model.detail}</Text></View>
+                  <Text style={[s.modelOptionCheck, selected && s.modelOptionCheckSelected]}>{selected ? '✓' : ''}</Text>
+                </Pressable>;
+              })}
+            </ScrollView>
+            <Text style={s.modelCostNote}>Model access and current rates are managed in your AI Gateway account.</Text>
+          </Pressable>
+        </Pressable>
+      </Modal>
       <PicChangeCarousel visible={photoPickerOpen} onClose={() => setPhotoPickerOpen(false)} />
     </View>
   );
@@ -260,6 +295,8 @@ const makeStyles = (palette: ThemeColors) => StyleSheet.create({
   emptyPieceText: { fontSize: 7, fontWeight: '700', letterSpacing: 0.3, color: palette.muted, textAlign: 'center' }, emptyPieceTextLarge: { fontSize: 7 },
   changePhoto: { position: 'absolute', bottom: 14, right: 14, backgroundColor: palette.surface, paddingHorizontal: 11, paddingVertical: 8, borderRadius: 12 }, changePhotoText: { fontSize: 11, fontWeight: '600', color: palette.ink },
   details: { marginHorizontal: 24, paddingTop: 8 },
+  modelPickerBlock: { marginBottom: 8 }, modelPicker: { minHeight: 43, flexDirection: 'row', alignItems: 'center', gap: 9, borderWidth: 1, borderColor: palette.line, borderRadius: 13, paddingHorizontal: 12, paddingVertical: 7, backgroundColor: palette.surface }, modelPickerLabel: { fontSize: 9, letterSpacing: 1.3 }, modelPickerName: { flex: 1, color: palette.ink, fontSize: 12, fontWeight: '700' }, modelPickerChevron: { color: palette.ink, fontSize: 20, paddingHorizontal: 4, lineHeight: 23 },
+  modelBackdrop: { flex: 1, justifyContent: 'flex-end', backgroundColor: '#0006' }, modelSheet: { maxHeight: '82%', backgroundColor: palette.paper, borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 24, paddingBottom: 30 }, modelPickerDescription: { color: palette.muted, fontSize: 12, lineHeight: 18, marginTop: -8, marginBottom: 12 }, modelList: { flexGrow: 0 }, modelOption: { minHeight: 68, flexDirection: 'row', alignItems: 'center', gap: 12, borderWidth: 1, borderColor: palette.line, borderRadius: 15, paddingHorizontal: 14, paddingVertical: 11, marginBottom: 8, backgroundColor: palette.surface }, modelOptionSelected: { borderColor: palette.olive, backgroundColor: palette.oliveWash }, modelOptionName: { color: palette.ink, fontSize: 13, fontWeight: '700' }, modelOptionDetail: { color: palette.muted, fontSize: 11, marginTop: 4 }, modelOptionCheck: { width: 22, height: 22, textAlign: 'center', overflow: 'hidden', color: palette.paper, backgroundColor: palette.line, borderRadius: 11, fontSize: 14, lineHeight: 22, fontWeight: '800' }, modelOptionCheckSelected: { backgroundColor: palette.olive }, modelCostNote: { color: palette.muted, fontSize: 10, lineHeight: 15, marginTop: 5 },
   actionDock: { minHeight: 78, flexDirection: 'row', alignItems: 'stretch', borderWidth: 1, borderColor: palette.line, borderRadius: 19, overflow: 'hidden', backgroundColor: palette.surface },
   actionItem: { flex: 1, minWidth: 0, alignItems: 'center', justifyContent: 'center', gap: 6, paddingHorizontal: 3, paddingVertical: 10 },
   actionPrimary: { backgroundColor: palette.oliveWash }, actionPressed: { opacity: 0.68 }, actionDisabled: { opacity: 0.45 },
