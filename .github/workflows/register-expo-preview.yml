@@ -1,6 +1,11 @@
 name: Register Expo preview deployment
 
 on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/register-expo-preview.yml
   workflow_dispatch:
     inputs:
       deployment_url:
@@ -20,9 +25,11 @@ jobs:
     steps:
       - name: Register Expo preview URL
         uses: actions/github-script@v7
+        env:
+          EXPO_DEPLOYMENT_URL: ${{ inputs.deployment_url || 'https://styleout--wiyoiyn3vl.expo.app/' }}
         with:
           script: |
-            const url = core.getInput('deployment_url', { required: true }).trim();
+            const url = process.env.EXPO_DEPLOYMENT_URL.trim();
             let parsed;
             try {
               parsed = new URL(url);
