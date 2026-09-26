@@ -64,6 +64,9 @@ type ClosetState = {
   bodyPhotoPath: string | null;
   mainPhotos: MainPhoto[];
   savedLooks: SavedLook[];
+  generationCooldownUntil: number | null;
+  generationCooldownLoaded: boolean;
+  refreshGenerationCooldown: () => Promise<void>;
   previousWardrobeAvailable: boolean;
   importPreviousWardrobe: () => Promise<void>;
   addItem: (item: NewItem) => Promise<ClosetItem>;
@@ -205,6 +208,9 @@ export function ClosetProvider({ children, userId }: { children: React.ReactNode
   const [bodyPhotoPath, setBodyPhotoPath] = useState<string | null>(null);
   const [mainPhotos, setMainPhotos] = useState<MainPhoto[]>([]);
   const [savedLooks, setSavedLooks] = useState<SavedLook[]>([]);
+  const [generationCooldownUntil, setGenerationCooldownUntil] = useState<number | null>(null);
+  const [generationCooldownLoaded, setGenerationCooldownLoaded] = useState(false);
+  const cooldownRequestId = useRef(0);
   const [imageGenerationModel, setImageGenerationModelState] = useState<ImageGenerationModel>(DEFAULT_IMAGE_GENERATION_MODEL);
   const [hasAiGatewayKey, setHasAiGatewayKey] = useState(false);
   const [aiGatewayKeyStatusLoaded, setAiGatewayKeyStatusLoaded] = useState(false);
@@ -429,6 +435,28 @@ export function ClosetProvider({ children, userId }: { children: React.ReactNode
     if (hasCompletedGeneration) await refresh();
   }, [client, clearPersistentToast, refresh, showPersistentToast, showToast, userId]);
 
+  const refreshGenerationCooldown = useCallback(async () => {
+    const requestId = ++cooldownRequestId.current;
+    setGenerationCooldownLoaded(false);
+    setGenerationCooldownUntil(null);
+    if (!client || !userId) {
+      setGenerationCooldownUntil(null);
+      setGenerationCooldownLoaded(true);
+      return;
+    }
+    try {
+      const { data, error } = await client.rpc('styleout_get_generation_cooldown');
+      if (error) throw error;
+      const row = Array.isArray(data) ? data[0] : data;
+      const remainingSeconds = Math.max(0, Number(row?.retry_after_seconds) || 0);
+      if (requestId === cooldownRequestId.current) {
+        setGenerationCooldownUntil(remainingSeconds > 0 ? Date.now() + remainingSeconds * 1000 : null);
+      }
+    } finally {
+      if (requestId === cooldownRequestId.current) setGenerationCooldownLoaded(true);
+    }
+  }, [client, userId]);
+
   useEffect(() => {
     if (!userId || !client) { setReady(true); return; }
     let active = true;
@@ -474,7 +502,9 @@ export function ClosetProvider({ children, userId }: { children: React.ReactNode
     }
   };
   const value: ClosetState = {
-    items, name, bio, bodyPhoto, bodyPhotoPath, mainPhotos, savedLooks, previousWardrobeAvailable,
+    items, name, bio, bodyPhoto, bodyPhotoPath, mainPhotos, savedLooks,
+    generationCooldownUntil, generationCooldownLoaded, refreshGenerationCooldown,
+    previousWardrobeAvailable,
     onboardingLoaded, onboardingComplete, onboardingReplayRequested, completeOnboarding, replayOnboarding,
     refreshCloset: refresh,
     wardrobeDraft,
@@ -623,7 +653,17 @@ export function ClosetProvider({ children, userId }: { children: React.ReactNode
       if (error) {
         const response = 'context' in error ? error.context : null;
         const detail = response instanceof Response ? await response.json().catch(() => null) : null;
+        const retryAfterSeconds = Math.max(0, Number(detail?.retryAfterSeconds) || 0);
+        if (retryAfterSeconds > 0) {
+          setGenerationCooldownUntil(Date.now() + retryAfterSeconds * 1000);
+          setGenerationCooldownLoaded(true);
+        }
         throw new Error(detail?.error || 'Could not start image generation. Please try again.');
+      }
+      const acceptedCooldownSeconds = Math.max(0, Number(data?.retryAfterSeconds) || 0);
+      if (acceptedCooldownSeconds > 0) {
+        setGenerationCooldownUntil(Date.now() + acceptedCooldownSeconds * 1000);
+        setGenerationCooldownLoaded(true);
       }
       if (data?.status === 'running') {
         generationStatuses.current.set(id, 'running');

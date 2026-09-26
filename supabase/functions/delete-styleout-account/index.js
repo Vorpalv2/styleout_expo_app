@@ -51,7 +51,7 @@ Deno.serve(async (request) => {
     const imagePaths = await listUserFiles(admin, userId);
 
     // Remove children before parents because wardrobe links restrict item deletion.
-    for (const table of ['instagram_oauth_states', 'instagram_connections', 'instagram_imports', 'saved_look_items', 'saved_looks', 'wardrobe_items', 'styleout_profiles']) {
+    for (const table of ['instagram_oauth_states', 'instagram_connections', 'instagram_imports', 'saved_look_items', 'saved_looks', 'styleout_generation_limits', 'wardrobe_items', 'styleout_profiles']) {
       await removeRows(admin, table, userId);
     }
 

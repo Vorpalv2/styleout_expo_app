@@ -11,7 +11,7 @@ const modelReferenceLimits = new Map([
   ['openai/gpt-image-2.5-flare', 4],
   ['openai/gpt-image-2.5-sunburst', 4],
 ]);
-const reply = (status, payload) => new Response(JSON.stringify(payload), { status, headers });
+const reply = (status, payload, extraHeaders = {}) => new Response(JSON.stringify(payload), { status, headers: { ...headers, ...extraHeaders } });
 const validId = (value) => typeof value === 'string' && /^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(value);
 
 function fileType(path) {
@@ -188,18 +188,33 @@ Deno.serve(async (request) => {
     key = personalKey;
   }
 
-  const stale = look.generation_started_at && Date.now() - new Date(look.generation_started_at).getTime() > 150000;
-  if (look.generation_status === 'running' && !stale) return reply(202, { status: 'running' });
-  let claim = admin.from('saved_looks').update({ generation_status: 'running', generation_started_at: new Date().toISOString(), generation_error: null, background_blur: backgroundBlur })
-    .eq('id', lookId).eq('user_id', look.user_id);
-  if (look.generated_image_path && forceRegenerate) claim = claim.eq('generated_image_path', look.generated_image_path);
-  else claim = claim.is('generated_image_path', null);
-  claim = stale
-    ? claim.lt('generation_started_at', new Date(Date.now() - 150000).toISOString())
-    : claim.in('generation_status', forceRegenerate ? ['idle', 'failed', 'complete'] : ['idle', 'failed']);
-  const { data: claimed, error: claimError } = await claim.select('id').maybeSingle();
-  if (claimError) return reply(500, { error: 'Could not start image generation.' });
-  if (!claimed) return reply(202, { status: 'running' });
+  const { data: claimRows, error: claimError } = await admin.rpc('styleout_claim_generation', {
+    p_user_id: look.user_id,
+    p_look_id: lookId,
+    p_force_regenerate: forceRegenerate,
+    p_expected_generated_image_path: forceRegenerate ? look.generated_image_path : null,
+    p_background_blur: backgroundBlur,
+  });
+  if (claimError) {
+    console.error('Could not claim a generation slot', claimError.message);
+    return reply(500, { error: 'Could not start image generation. Please try again.' });
+  }
+  const claim = Array.isArray(claimRows) ? claimRows[0] : claimRows;
+  if (!claim) return reply(500, { error: 'Could not start image generation. Please try again.' });
+  if (claim.result === 'cooldown') {
+    return reply(429, {
+      code: 'generation_cooldown',
+      error: 'Please wait before starting another AI generation.',
+      retryAfterSeconds: claim.retry_after_seconds,
+      nextAllowedAt: claim.next_allowed_at,
+    }, { 'Retry-After': String(claim.retry_after_seconds) });
+  }
+  if (claim.result === 'running') return reply(202, { status: 'running', nextAllowedAt: claim.next_allowed_at });
+  if (claim.result === 'complete') return reply(200, { status: 'complete' });
+  if (claim.result === 'not_found') return reply(404, { error: 'Saved look not found.' });
+  if (claim.result === 'conflict') return reply(409, { error: 'This saved look changed. Refresh it and try again.' });
+  if (claim.result !== 'started') return reply(409, { error: 'This look is already being generated. Please wait.' });
+
   EdgeRuntime.waitUntil(runGeneration(admin, look, describedItems, key, additionalInstructions, backgroundBlur, model));
-  return reply(202, { status: 'running' });
+  return reply(202, { status: 'running', nextAllowedAt: claim.next_allowed_at, retryAfterSeconds: claim.retry_after_seconds });
 });
