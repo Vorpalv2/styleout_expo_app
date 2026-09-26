@@ -382,6 +382,53 @@ export function ClosetProvider({ children, userId }: { children: React.ReactNode
     setLoadError(null);
   }, [client, clearPersistentToast, showPersistentToast, showToast, userId]);
 
+  // Poll only generation metadata while work is running. Signed URLs and wardrobe data
+  // are loaded once after completion, so unrelated images do not flash on every tick.
+  const pollGenerationStatuses = useCallback(async () => {
+    if (!client || !userId) return;
+    const { data, error } = await client.from('saved_looks')
+      .select('id,title,generation_status,generation_error,generation_started_at')
+      .eq('user_id', userId);
+    if (error) throw error;
+
+    const rows = data || [];
+    const updates = new Map<string, Pick<SavedLook, 'generationStatus' | 'generationError' | 'generationStartedAt'>>();
+    let hasCompletedGeneration = false;
+    for (const row of rows) {
+      const status = (row.generation_status || 'idle') as SavedLook['generationStatus'];
+      const previousStatus = generationStatuses.current.get(row.id);
+      const generationError = row.generation_error || null;
+      const generationStartedAt = row.generation_started_at ? new Date(row.generation_started_at).getTime() : null;
+      if (previousStatus === 'running' && status === 'complete') {
+        pendingGenerationToasts.current.push({ message: `${row.title || 'Your style'} is ready in Saved Looks.`, tone: 'success' });
+        hasCompletedGeneration = true;
+      } else if (previousStatus === 'running' && status === 'failed') {
+        pendingGenerationToasts.current.push({ message: generationError || `${row.title || 'Your style'} could not be generated.`, tone: 'error' });
+      }
+      generationStatuses.current.set(row.id, status);
+      if (previousStatus !== status) updates.set(row.id, { generationStatus: status, generationError, generationStartedAt });
+    }
+
+    if (updates.size) {
+      setSavedLooks((current) => current.map((look) => {
+        const update = updates.get(look.id);
+        return update ? { ...look, ...update } : look;
+      }));
+    }
+
+    const activeCount = rows.filter((row) => row.generation_status === 'running'
+      && (!row.generation_started_at || Date.now() - new Date(row.generation_started_at).getTime() < 150000)).length;
+    if (activeCount) {
+      showPersistentToast(activeCount === 1 ? 'Image generating…' : `${activeCount} images generating…`, 'info');
+    } else {
+      clearPersistentToast();
+      const finished = pendingGenerationToasts.current.splice(0);
+      if (finished.length) showToast(finished.map((entry) => entry.message).join(' '), finished.some((entry) => entry.tone === 'error') ? 'error' : 'success');
+    }
+
+    if (hasCompletedGeneration) await refresh();
+  }, [client, clearPersistentToast, refresh, showPersistentToast, showToast, userId]);
+
   useEffect(() => {
     if (!userId || !client) { setReady(true); return; }
     let active = true;
@@ -405,9 +452,9 @@ export function ClosetProvider({ children, userId }: { children: React.ReactNode
 
   useEffect(() => {
     if (!savedLooks.some((look) => look.generationStatus === 'running' && (!look.generationStartedAt || Date.now() - look.generationStartedAt < 150000))) return;
-    const timer = setInterval(() => refresh().catch(() => {}), 5000);
+    const timer = setInterval(() => pollGenerationStatuses().catch(() => {}), 5000);
     return () => clearInterval(timer);
-  }, [savedLooks, refresh]);
+  }, [savedLooks, pollGenerationStatuses]);
 
   if (!ready) return <WardrobeLoadingScreen />;
   if (loadError || !client) return <View style={[styles.center, { backgroundColor: theme.paper }]}><Text style={[styles.heading, { color: theme.ink }]}>{client ? 'Could not load your wardrobe' : 'Supabase setup needed'}</Text><Text style={[styles.copy, { color: theme.muted }]}>{loadError || 'Set EXPO_PUBLIC_SUPABASE_URL and EXPO_PUBLIC_SUPABASE_KEY in .env.local.'}</Text>{client && <Pressable onPress={() => { setReady(false); refresh().catch((error) => setLoadError(message(error))).finally(() => setReady(true)); }} style={[styles.retry, { backgroundColor: theme.ink }]}><Text style={[styles.retryText, { color: theme.paper }]}>Try again</Text></Pressable>}</View>;

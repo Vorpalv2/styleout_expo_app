@@ -1,7 +1,7 @@
 import { useFocusEffect, useRouter, type Href } from 'expo-router';
 import { useClerk } from '@clerk/expo';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, KeyboardAvoidingView, Modal, PanResponder, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
+import { ActivityIndicator, Alert, KeyboardAvoidingView, Modal, PanResponder, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
 import { ActionButton, AppHeader, radii, RoundAction, samplePieces, SmallCaps } from '@/components/StyleoutUI';
 import { ThemeColors, useStyleoutTheme } from '@/components/StyleoutTheme';
 import { LoadingImage } from '@/components/LoadingImage';
@@ -52,6 +52,8 @@ export default function StyleScreen() {
   const [backgroundBlur, setBackgroundBlur] = useState(false);
   const [chosen, setChosen] = useState<Record<number, ClosetItem>>({});
   const [saving, setSaving] = useState(false);
+  const [generationRequestStartedAt, setGenerationRequestStartedAt] = useState<number | null>(null);
+  const [clockNow, setClockNow] = useState(Date.now());
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
   const [stageWidth, setStageWidth] = useState(0);
   const [reveal, setReveal] = useState(50);
@@ -72,9 +74,20 @@ export default function StyleScreen() {
   const selectedImageModel = IMAGE_GENERATION_MODELS.find((model) => model.id === imageGenerationModel) || IMAGE_GENERATION_MODELS[0];
   hasGeneratedRef.current = !!generatedImage;
   const generating = savedLook?.generationStatus === 'running' && (!savedLook.generationStartedAt || Date.now() - savedLook.generationStartedAt < 150000);
+  const generationClockStartedAt = generationRequestStartedAt ?? savedLook?.generationStartedAt ?? clockNow;
+  const generationElapsedSeconds = Math.max(0, Math.floor((clockNow - generationClockStartedAt) / 1000));
   const generateLabel = generatedImage ? 'Regenerate' : generating ? 'Generating' : saving ? 'Starting' : savedLook?.generationStatus === 'failed' || savedLook?.generationStatus === 'running' ? 'Retry' : 'Generate';
   const saveLabel = saving ? 'Saving' : savedLook && styleName.trim() !== savedLook.title ? 'Update' : savedLook ? 'Saved looks' : 'Save look';
   useEffect(() => { if (savedLook) { setStyleName(savedLook.title); setBackgroundBlur(savedLook.backgroundBlur); } }, [savedLook?.id]);
+  useEffect(() => {
+    if (!generating) return;
+    setClockNow(Date.now());
+    const timer = setInterval(() => setClockNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [generating]);
+  useEffect(() => {
+    if (!generating && !saving && generationRequestStartedAt !== null) setGenerationRequestStartedAt(null);
+  }, [generating, saving, generationRequestStartedAt]);
   useEffect(() => { setReveal(50); }, [generatedImage]);
   useFocusEffect(useCallback(() => {
     if (!onboardingLoaded || onboardingComplete) return;
@@ -128,12 +141,15 @@ export default function StyleScreen() {
   }
   async function generateStyle() {
     if (saving || generating) return;
-    setSaving(true); setSaveMessage(null);
+    const title = styleName.trim();
+    if (!title) { const detail = 'Name your style before generating it.'; setSaveMessage(detail); showToast(detail, 'error'); return; }
+    const maxWardrobeItems = maxWardrobeItemsForModel(imageGenerationModel);
+    if (selections.length > maxWardrobeItems) {
+      const detail = `${selectedImageModel.name} accepts your photo plus up to ${maxWardrobeItems} wardrobe pieces. Remove ${selections.length - maxWardrobeItems} selected ${selections.length - maxWardrobeItems === 1 ? 'piece' : 'pieces'} and try again.`;
+      setSaveMessage(detail); showToast(detail, 'error'); return;
+    }
+    setSaving(true); setSaveMessage(null); setGenerationRequestStartedAt(Date.now()); setClockNow(Date.now());
     try {
-      const title = styleName.trim();
-      if (!title) throw new Error('Name your style before generating it.');
-      const maxWardrobeItems = maxWardrobeItemsForModel(imageGenerationModel);
-      if (selections.length > maxWardrobeItems) throw new Error(`${selectedImageModel.name} accepts your photo plus up to ${maxWardrobeItems} wardrobe pieces. Remove ${selections.length - maxWardrobeItems} selected ${selections.length - maxWardrobeItems === 1 ? 'piece' : 'pieces'} and try again.`);
       let id = savedLook?.id;
       if (id && title !== savedLook?.title) await updateLookTitle(id, title);
       if (!id) id = await saveLook(title, selections, selectedNames, backgroundBlur);
@@ -299,10 +315,22 @@ export default function StyleScreen() {
                   showToast('Your AI Gateway key is saved securely.');
                 } catch (error) { showToast(error instanceof Error ? error.message : 'Could not save your key.', 'error'); }
                 finally { setSavingGatewayKey(false); }
-              }} label={savingGatewayKey ? 'Saving securely…' : 'Save key & unlock model'} style={s.keySaveButton} />
+      }} label={savingGatewayKey ? 'Saving securely…' : 'Save key & unlock model'} style={s.keySaveButton} />
             </Pressable>
           </KeyboardAvoidingView>
         </Pressable>
+      </Modal>
+      <Modal visible={generating} transparent animationType="fade" statusBarTranslucent onRequestClose={() => {}}>
+        <View style={s.generationBackdrop} accessibilityViewIsModal accessibilityLabel="Image generating">
+          <View style={s.generationCard}>
+            <View style={s.generationSpinner}><ActivityIndicator size="large" color={palette.olive} /></View>
+            <SmallCaps>STYLEOUT AI STUDIO</SmallCaps>
+            <Text style={s.generationTitle}>Image generating</Text>
+            <Text style={s.generationCopy}>Please wait while we create your look.</Text>
+            <Text accessibilityLiveRegion="polite" style={s.generationTimer}>{generationElapsedSeconds}<Text style={s.generationTimerUnit}> sec</Text></Text>
+            <Text style={s.generationElapsedLabel}>ELAPSED</Text>
+          </View>
+        </View>
       </Modal>
       <PicChangeCarousel visible={photoPickerOpen} onClose={() => setPhotoPickerOpen(false)} />
     </View>
@@ -328,6 +356,7 @@ const makeStyles = (palette: ThemeColors) => StyleSheet.create({
   details: { marginHorizontal: 24, paddingTop: 8 },
   modelPickerBlock: { marginBottom: 8 }, modelPicker: { minHeight: 43, flexDirection: 'row', alignItems: 'center', gap: 9, borderWidth: 1, borderColor: palette.line, borderRadius: 13, paddingHorizontal: 12, paddingVertical: 7, backgroundColor: palette.surface }, modelPickerLabel: { fontSize: 9, letterSpacing: 1.3 }, modelPickerName: { flex: 1, color: palette.ink, fontSize: 12, fontWeight: '700' }, modelPickerChevron: { color: palette.ink, fontSize: 20, paddingHorizontal: 4, lineHeight: 23 },
   modelBackdrop: { flex: 1, justifyContent: 'flex-end', backgroundColor: '#0006' }, modelSheet: { maxHeight: '82%', backgroundColor: palette.paper, borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 24, paddingBottom: 30 }, modelPickerDescription: { color: palette.muted, fontSize: 12, lineHeight: 18, marginTop: -8, marginBottom: 12 }, modelList: { flexGrow: 0 }, modelOption: { minHeight: 68, flexDirection: 'row', alignItems: 'center', gap: 12, borderWidth: 1, borderColor: palette.line, borderRadius: 15, paddingHorizontal: 14, paddingVertical: 11, marginBottom: 8, backgroundColor: palette.surface }, modelOptionSelected: { borderColor: palette.olive, backgroundColor: palette.oliveWash }, modelOptionLocked: { opacity: 0.55 }, modelOptionName: { color: palette.ink, fontSize: 13, fontWeight: '700' }, modelOptionNameLocked: { color: palette.muted }, modelOptionDetail: { color: palette.muted, fontSize: 11, marginTop: 4 }, modelKeyRequired: { color: palette.olive, fontSize: 10, fontWeight: '600', marginTop: 5 }, modelOptionCheck: { width: 22, height: 22, textAlign: 'center', overflow: 'hidden', color: palette.paper, backgroundColor: palette.line, borderRadius: 11, fontSize: 14, lineHeight: 22, fontWeight: '800' }, modelOptionCheckSelected: { backgroundColor: palette.olive }, modelCostNote: { color: palette.muted, fontSize: 10, lineHeight: 15, marginTop: 5 },
+  generationBackdrop: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, backgroundColor: 'rgba(15, 16, 14, 0.56)' }, generationCard: { width: '100%', maxWidth: 360, alignItems: 'center', paddingHorizontal: 28, paddingVertical: 32, borderRadius: 26, backgroundColor: palette.paper, borderWidth: 1, borderColor: palette.line, shadowColor: '#000', shadowOpacity: 0.18, shadowRadius: 24, shadowOffset: { width: 0, height: 12 }, elevation: 14 }, generationSpinner: { width: 64, height: 64, borderRadius: 32, alignItems: 'center', justifyContent: 'center', backgroundColor: palette.oliveWash, marginBottom: 21 }, generationTitle: { color: palette.ink, fontSize: 24, lineHeight: 30, fontWeight: '700', letterSpacing: -0.7, marginTop: 8 }, generationCopy: { color: palette.muted, fontSize: 13, lineHeight: 19, textAlign: 'center', marginTop: 7 }, generationTimer: { color: palette.ink, fontSize: 46, lineHeight: 54, fontWeight: '800', letterSpacing: -1.8, marginTop: 22, fontVariant: ['tabular-nums'] }, generationTimerUnit: { color: palette.olive, fontSize: 22, letterSpacing: -0.4 }, generationElapsedLabel: { color: palette.muted, fontSize: 9, fontWeight: '800', letterSpacing: 1.7, marginTop: 0 },
   keyDialogWrap: { flex: 1, justifyContent: 'center', padding: 22 }, keyDialog: { width: '100%', maxWidth: 480, alignSelf: 'center', padding: 22, borderRadius: 24, backgroundColor: palette.paper }, keyDialogCopy: { color: palette.muted, fontSize: 12, lineHeight: 18, marginTop: -4, marginBottom: 18 }, keyInput: { height: 50, paddingHorizontal: 14, borderWidth: 1, borderColor: palette.line, borderRadius: 13, color: palette.ink, backgroundColor: palette.surface, marginBottom: 14 }, keySaveButton: { marginTop: 4 },
   actionDock: { minHeight: 78, flexDirection: 'row', alignItems: 'stretch', borderWidth: 1, borderColor: palette.line, borderRadius: 19, overflow: 'hidden', backgroundColor: palette.surface },
   actionItem: { flex: 1, minWidth: 0, alignItems: 'center', justifyContent: 'center', gap: 6, paddingHorizontal: 3, paddingVertical: 10 },
