@@ -20,6 +20,7 @@ function AppNavigator() {
       <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.paper } }}>
         <Stack.Protected guard={!isSignedIn}>
           <Stack.Screen name="sign-in" />
+          <Stack.Screen name="auth-callback" />
         </Stack.Protected>
         <Stack.Protected guard={!!isSignedIn}>
           <Stack.Screen name="(tabs)" />

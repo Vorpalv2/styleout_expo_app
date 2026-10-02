@@ -1,7 +1,7 @@
-import { useSSO } from '@clerk/expo';
+import { getClerkInstance, useSSO } from '@clerk/expo';
 import { useHostedAuth } from '@clerk/expo/hosted-auth';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Image, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { ActivityIndicator, Alert, Image, Platform, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import Animated, { Easing, useAnimatedStyle, useReducedMotion, useSharedValue, withRepeat, withTiming } from 'react-native-reanimated';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BrandMark, palette, SmallCaps } from '@/components/StyleoutUI';
@@ -72,15 +72,33 @@ export default function SignInExperience() {
   const { startSSOFlow } = useSSO();
   const insets = useSafeAreaInsets();
   const [busy, setBusy] = useState(false);
+  const [busyStrategy, setBusyStrategy] = useState<'oauth_google' | 'oauth_apple' | null>(null);
 
   async function continueWith(strategy: 'oauth_google' | 'oauth_apple') {
     if (busy) return;
     setBusy(true);
+    setBusyStrategy(strategy);
     try {
+      // Expo's web auth-session flow opens a popup after an async Clerk request.
+      // Mobile browsers can block that popup because it is no longer in the
+      // original tap event. Use Clerk's same-page redirect flow on web instead.
+      if (Platform.OS === 'web') {
+        const clerk = getClerkInstance();
+        const signIn = clerk?.client?.signIn;
+        if (!signIn) throw new Error('Sign-in is still loading. Please try again.');
+        await signIn.authenticateWithRedirect({
+          strategy,
+          redirectUrl: `${window.location.origin}/auth-callback`,
+          redirectUrlComplete: `${window.location.origin}/`,
+          continueSignUp: true,
+        });
+        return;
+      }
+
       const { createdSessionId, setActive } = await startSSOFlow({ strategy });
       if (createdSessionId && setActive) await setActive({ session: createdSessionId });
     } catch (error) { Alert.alert('Sign-in unavailable', error instanceof Error ? error.message : 'Please try again.'); }
-    finally { setBusy(false); }
+    finally { setBusy(false); setBusyStrategy(null); }
   }
 
   async function continueWithEmail() {
@@ -99,8 +117,8 @@ export default function SignInExperience() {
         <View style={[styles.top, { paddingTop: insets.top + 18 }]}><BrandMark inverted /><Text style={styles.wordmark}>STYLEOUT</Text></View>
         <View style={styles.copy}><SmallCaps style={styles.caps}>YOUR DIGITAL DRESSING ROOM</SmallCaps><Text style={styles.title}>Wear what you own.{ '\n' }Make it yours.</Text><Text style={styles.body}>Create outfits from your wardrobe and discover new ways to style every piece.</Text></View>
         <View style={[styles.bottom, { paddingBottom: insets.bottom + 18 }]}><Text style={styles.prompt}>CONTINUE WITH</Text><View style={styles.actions}>
-          <Pressable disabled={busy} onPress={() => continueWith('oauth_apple')} accessibilityLabel="Sign in with Apple" style={styles.action}><Text style={styles.apple}></Text></Pressable>
-          <Pressable disabled={busy} onPress={() => continueWith('oauth_google')} accessibilityLabel="Sign in with Google" style={styles.action}><Text style={styles.google}>G</Text></Pressable>
+          <Pressable disabled={busy} onPress={() => continueWith('oauth_apple')} accessibilityLabel="Sign in with Apple" style={styles.action}>{busyStrategy === 'oauth_apple' ? <ActivityIndicator color="#fff" /> : <Text style={styles.apple}></Text>}</Pressable>
+          <Pressable disabled={busy} onPress={() => continueWith('oauth_google')} accessibilityLabel="Sign in with Google" style={styles.action}>{busyStrategy === 'oauth_google' ? <ActivityIndicator color="#fff" /> : <Text style={styles.google}>G</Text>}</Pressable>
           <Pressable disabled={busy} onPress={continueWithEmail} accessibilityLabel="Sign in with email" style={styles.action}>{busy ? <ActivityIndicator color="#fff" /> : <Text style={styles.email}>✉</Text>}</Pressable>
         </View><Text style={styles.legal}>By continuing, you agree to our{ '\n' }Terms of Service and Privacy Policy.</Text></View>
       </View>

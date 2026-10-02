@@ -9,7 +9,7 @@ import { useToast } from '@/components/Toast';
 type Props = { visible: boolean; onClose: () => void };
 
 export function PicChangeCarousel({ visible, onClose }: Props) {
-  const { colors: palette } = useStyleoutTheme();
+  const { colors: palette, isDark } = useStyleoutTheme();
   const { showToast } = useToast();
   const s = useMemo(() => makeStyles(palette), [palette]);
   const { bodyPhotoPath, mainPhotos, setBodyPhoto, selectMainPhoto, deleteMainPhoto } = useCloset();
@@ -72,7 +72,7 @@ export function PicChangeCarousel({ visible, onClose }: Props) {
           <View style={s.dots}>{mainPhotos.map((photo, dotIndex) => <Pressable key={photo.path} onPress={() => setIndex(dotIndex)} accessibilityLabel={`Show photo ${dotIndex + 1}`} style={[s.dot, dotIndex === index && s.dotActive]} />)}</View>
           <Text style={s.status}>{current.path === bodyPhotoPath ? 'Currently selected' : `${index + 1} of ${mainPhotos.length}`}</Text>
           <View style={s.actions}>
-            <Pressable onPress={() => choose(current)} disabled={busy || current.path === bodyPhotoPath} style={[s.primary, (busy || current.path === bodyPhotoPath) && s.disabled]}><Text style={s.primaryText}>{busy ? 'Saving…' : current.path === bodyPhotoPath ? 'Selected photo' : 'Use this photo'}</Text></Pressable>
+            <Pressable onPress={() => choose(current)} disabled={busy || current.path === bodyPhotoPath} style={[s.primary, (busy || current.path === bodyPhotoPath) && s.disabled]}><Text style={[s.primaryText, { color: isDark ? palette.paper : '#fff' }]}>{busy ? 'Saving…' : current.path === bodyPhotoPath ? 'Selected photo' : 'Use this photo'}</Text></Pressable>
             <Pressable onPress={removePhoto} disabled={busy} style={[s.delete, busy && s.disabled]}><Text style={s.deleteText}>Delete photo</Text></Pressable>
           </View>
         </> : <View style={s.empty}><Text style={s.emptyTitle}>No saved photos yet</Text><Text style={s.emptyCopy}>Add a full-length photo to start styling yourself.</Text></View>}

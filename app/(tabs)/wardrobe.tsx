@@ -10,7 +10,8 @@ import { CATEGORIES, Category, ClosetItem, pickPhoto, useCloset } from '@/lib/cl
 
 export default function WardrobeScreen() {
   const router = useRouter();
-  const { colors: palette } = useStyleoutTheme();
+  const { colors: palette, isDark } = useStyleoutTheme();
+  const activeLabelColor = isDark ? palette.paper : '#fff';
   const { showToast } = useToast();
   const s = useMemo(() => makeStyles(palette), [palette]);
   const { items, addItem, updateItem, removeItem, wardrobeDraft, clearWardrobeDraft, queueStyleSelection } = useCloset();
@@ -93,10 +94,10 @@ export default function WardrobeScreen() {
   return (
     <View style={s.screen}>
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 32 }} alwaysBounceVertical refreshControl={Platform.OS === 'web' ? undefined : <ClosetRefreshControl />}>
-        <AppHeader eyebrow="THE PIECES YOU OWN" title="Wardrobe" right={<RoundAction label="Add clothing item" onPress={startAdd}><Text style={s.plus}>＋</Text></RoundAction>} />
+        <AppHeader title="Wardrobe" right={<RoundAction label="Add clothing item" onPress={startAdd}><Text style={s.plus}>＋</Text></RoundAction>} />
         <View style={s.intro}><Text style={s.introText}>Every good look starts here.</Text><Text style={s.count}>{items.length} {items.length === 1 ? 'PIECE' : 'PIECES'}</Text></View>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.filters}>
-          {['All', ...CATEGORIES].map((item) => <Pressable key={item} onPress={() => setFilter(item)} style={[s.filter, filter === item && s.filterActive]}><Text style={[s.filterText, filter === item && s.filterTextActive]}>{item}</Text></Pressable>)}
+          {['All', ...CATEGORIES].map((item) => <Pressable key={item} onPress={() => setFilter(item)} style={[s.filter, filter === item && s.filterActive]}><Text style={[s.filterText, filter === item && s.filterTextActive, filter === item && { color: activeLabelColor }]}>{item}</Text></Pressable>)}
         </ScrollView>
         {shown.length ? <View style={s.grid}>{shown.map((item) => (
           <Pressable key={item.id} onPress={() => setDetail(item)} style={s.card}>
@@ -118,7 +119,7 @@ export default function WardrobeScreen() {
             {draftImage ? <Pressable onPress={changeDraftPhoto} accessibilityLabel="Change piece photo"><LoadingImage source={{ uri: draftImage }} style={s.preview} resizeMode="contain" /><Text style={s.changeImage}>Change photo ↗</Text></Pressable> : null}
             <Text style={s.label}>PIECE NAME *</Text><TextInput value={name} onChangeText={setName} placeholder="e.g. White linen shirt" placeholderTextColor="#A7A7A2" style={s.input} autoCapitalize="words" />
             <Text style={s.label}>CATEGORY *</Text>
-            <View style={s.categoryWrap}>{CATEGORIES.map((item) => <Pressable key={item} onPress={() => setCategory(item)} style={[s.category, category === item && s.categoryActive]}><Text style={[s.categoryText, category === item && s.categoryTextActive]}>{item}</Text></Pressable>)}</View>
+            <View style={s.categoryWrap}>{CATEGORIES.map((item) => <Pressable key={item} onPress={() => setCategory(item)} style={[s.category, category === item && s.categoryActive]}><Text style={[s.categoryText, category === item && s.categoryTextActive, category === item && { color: activeLabelColor }]}>{item}</Text></Pressable>)}</View>
             <Text style={s.label}>COLOR</Text><TextInput value={color} onChangeText={setColor} placeholder="e.g. Ivory" placeholderTextColor="#A7A7A2" style={s.input} />
             <Text style={s.label}>BRAND</Text><TextInput value={brand} onChangeText={setBrand} placeholder="Optional" placeholderTextColor="#A7A7A2" style={s.input} />
             <Text style={s.label}>NOTES</Text><TextInput value={notes} onChangeText={setNotes} placeholder="Fit, fabric, or anything to remember" placeholderTextColor="#A7A7A2" style={[s.input, s.notes]} multiline />

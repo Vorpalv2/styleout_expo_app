@@ -2,7 +2,7 @@ import { useFocusEffect, useRouter, type Href } from 'expo-router';
 import { useClerk } from '@clerk/expo';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, KeyboardAvoidingView, Modal, PanResponder, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
-import { ActionButton, AppHeader, radii, RoundAction, samplePieces, SmallCaps } from '@/components/StyleoutUI';
+import { ActionButton, AppHeader, radii, RoundAction, samplePieces, SignOutIcon, SignOutConfirmationModal, SmallCaps } from '@/components/StyleoutUI';
 import { ThemeColors, useStyleoutTheme } from '@/components/StyleoutTheme';
 import { LoadingImage } from '@/components/LoadingImage';
 import { PicChangeCarousel } from '@/components/PicChangeCarousel';
@@ -12,29 +12,20 @@ import { OnboardingTour } from '@/components/OnboardingTour';
 import { ClosetItem, lookSignature, takePhoto, useCloset } from '@/lib/closet';
 import { DEFAULT_IMAGE_GENERATION_MODEL, IMAGE_GENERATION_MODELS, maxWardrobeItemsForModel } from '@/lib/imageModels';
 
-const lookImage = require('../../assets/styleout/look.png');
 type Styles = ReturnType<typeof makeStyles>;
 function EmptyPiece({ large = false, label, styles: s }: { large?: boolean; label?: string; styles: Styles }) {
   return <View style={s.emptyWrap}><View style={[s.emptyPiece, large && s.emptyPieceLarge]}><Text style={[s.emptyPieceIcon, large && s.emptyPieceIconLarge]}>＋</Text><Text style={[s.emptyPieceText, large && s.emptyPieceTextLarge]}>NO ITEMS{large ? ' SELECTED' : '\nSELECTED'}</Text></View>{label ? <Text style={s.emptyPieceLabel}>{label}</Text> : null}</View>;
 }
-function LogoutIcon({ styles: s }: { styles: Styles }) {
-  return <View style={s.logoutIcon} accessibilityElementsHidden>
-    <View style={s.logoutDoor} />
-    {/*<View style={s.logoutArrow} />*/}
-    <View style={s.logoutArrowTop} />
-    <View style={s.logoutArrowBottom} />
-  </View>;
-}
-
 export default function StyleScreen() {
   const router = useRouter();
   const { colors: palette } = useStyleoutTheme();
   const { showToast } = useToast();
   const s = useMemo(() => makeStyles(palette), [palette]);
-  const { height } = useWindowDimensions();
+  const { height, width } = useWindowDimensions();
+  const compactLayout = width < 600;
   const { signOut } = useClerk();
   const { bodyPhoto, bodyPhotoPath, items, savedLooks, saveLook, generateLook, updateLookTitle,
-    updateLookBackgroundBlur, beginWardrobeDraft, pendingStyleSelection, clearPendingStyleSelection,
+    updateLookBackgroundBlur, clearBodyPhoto, beginWardrobeDraft, pendingStyleSelection, clearPendingStyleSelection,
     imageGenerationModel, setImageGenerationModel, hasAiGatewayKey, saveAiGatewayKey,
     generationCooldownUntil, generationCooldownLoaded, refreshGenerationCooldown,
     onboardingLoaded, onboardingComplete, onboardingReplayRequested, completeOnboarding } = useCloset();
@@ -42,6 +33,8 @@ export default function StyleScreen() {
   const [active, setActive] = useState(1);
   const [swapOpen, setSwapOpen] = useState(false);
   const [photoPickerOpen, setPhotoPickerOpen] = useState(false);
+  const [signOutConfirmOpen, setSignOutConfirmOpen] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
   const [instructionOpen, setInstructionOpen] = useState(false);
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
   const [gatewayKeyModalOpen, setGatewayKeyModalOpen] = useState(false);
@@ -58,6 +51,7 @@ export default function StyleScreen() {
   const [clockNow, setClockNow] = useState(Date.now());
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
   const [stageWidth, setStageWidth] = useState(0);
+  const [measuredStageHeight, setMeasuredStageHeight] = useState(0);
   const [reveal, setReveal] = useState(50);
   const revealRef = useRef(reveal);
   const dragStartRef = useRef(reveal);
@@ -65,7 +59,10 @@ export default function StyleScreen() {
   const hasGeneratedRef = useRef(false);
   revealRef.current = reveal;
   widthRef.current = stageWidth;
-  const stageHeight = Math.min(510, Math.max(400, height * 0.56));
+  const targetStageHeight = compactLayout
+    ? Math.max(245, Math.min(355, height - 487))
+    : Math.min(510, Math.max(400, height * 0.56));
+  const stageHeight = compactLayout && measuredStageHeight > 0 ? measuredStageHeight : targetStageHeight;
   const piece = samplePieces[active];
   const matching = items.filter((item) => item.category === piece.category);
   const selectedNames = samplePieces.map((_, i) => items.find((item) => item.id === chosen[i]?.id)?.name).filter((name): name is string => !!name);
@@ -120,9 +117,20 @@ export default function StyleScreen() {
     clearPendingStyleSelection();
   }, [pendingStyleSelection?.item.id, pendingStyleSelection?.slotIndex]);
   function changePhoto() { setPhotoPickerOpen(true); }
+  async function removeMainPhoto() {
+    try {
+      await clearBodyPhoto();
+      showToast('Main photo removed. You can add it again from your saved photos.', 'info');
+    } catch (error) {
+      Alert.alert('Could not remove photo', error instanceof Error ? error.message : 'Please try again.');
+    }
+  }
   async function leaveAccount() {
+    if (signingOut) return;
+    setSignOutConfirmOpen(false);
+    setSigningOut(true);
     try { await signOut(); }
-    catch { Alert.alert('Sign-out failed', 'Please try again.'); }
+    catch { Alert.alert('Sign-out failed', 'Please try again.'); setSigningOut(false); }
   }
   async function captureWardrobePiece() {
     setSwapOpen(false);
@@ -189,14 +197,24 @@ export default function StyleScreen() {
 
   return (
     <View style={s.screen}>
-      <ScrollView contentContainerStyle={{ paddingBottom: 25 }} showsVerticalScrollIndicator={false} alwaysBounceVertical refreshControl={Platform.OS === 'web' ? undefined : <ClosetRefreshControl />}>
-        <AppHeader eyebrow="YOUR DIGITAL DRESSING ROOM" title="Styleout" right={<RoundAction label="Sign out" onPress={leaveAccount}><LogoutIcon styles={s} /></RoundAction>} />
-        <View style={s.titleRow}>
+      <ScrollView contentContainerStyle={[s.scrollContent, { paddingBottom: compactLayout ? 0 : 25 }]} showsVerticalScrollIndicator={false} alwaysBounceVertical refreshControl={Platform.OS === 'web' ? undefined : <ClosetRefreshControl />}>
+        <AppHeader compact={compactLayout} title="Style" right={<RoundAction label="Sign out" onPress={() => setSignOutConfirmOpen(true)} disabled={signingOut}><SignOutIcon /></RoundAction>} />
+        <View style={[s.titleRow, compactLayout && s.titleRowCompact]}>
           <View style={s.titleInputWrap}><SmallCaps>YOUR STYLE NAME</SmallCaps><TextInput value={styleName} onChangeText={setStyleName} placeholder="Name this style" placeholderTextColor={palette.muted} style={s.lookTitle} maxLength={60} accessibilityLabel="Style name" /></View>
-          <Pressable onPress={changePhoto}><Text style={s.link}>Use my photo ↗</Text></Pressable>
+          {bodyPhotoPath ? <Pressable onPress={removeMainPhoto} accessibilityRole="button" accessibilityLabel="Remove main photo"><Text style={s.link}>Remove photo ×</Text></Pressable> : null}
         </View>
-        <View style={[s.stage, { height: stageHeight }]} onLayout={(event) => setStageWidth(event.nativeEvent.layout.width)}>
-          <LoadingImage source={bodyPhoto ? { uri: bodyPhoto } : lookImage} resizeMode="contain" style={s.model} />
+        <View style={compactLayout && s.mobileMainArea}>
+        <View style={[s.stage, compactLayout && s.stageCompact, { height: targetStageHeight }]} onLayout={(event) => {
+          const { width: layoutWidth, height: layoutHeight } = event.nativeEvent.layout;
+          setStageWidth(layoutWidth);
+          if (compactLayout) setMeasuredStageHeight((current) => current === layoutHeight ? current : layoutHeight);
+        }}>
+          {bodyPhoto
+            ? <LoadingImage source={{ uri: bodyPhoto }} resizeMode="contain" style={s.model} />
+            : <Pressable accessibilityRole="button" accessibilityLabel="Click to add photo" onPress={changePhoto} style={s.addPhotoPrompt}>
+              <Text style={s.addPhotoIcon}>＋</Text>
+              <Text style={s.addPhotoText}>Click to add photo</Text>
+            </Pressable>}
           {generatedImage && stageWidth > 0 ? <>
             <View pointerEvents="none" style={[s.comparisonClip, { left: stageWidth * reveal / 100, width: stageWidth * (1 - reveal / 100), height: stageHeight }]}>
               <LoadingImage source={{ uri: generatedImage }} resizeMode="contain" style={{ width: stageWidth, height: stageHeight, position: 'absolute', left: -stageWidth * reveal / 100, top: 0 }} />
@@ -226,15 +244,15 @@ export default function StyleScreen() {
               </View>
             );
           })}
-          <Pressable onPress={changePhoto} style={s.changePhoto}><Text style={s.changePhotoText}>↗  Change photo</Text></Pressable>
+      {bodyPhoto ? <Pressable onPress={changePhoto} style={s.changePhoto}><Text style={s.changePhotoText}>↗  Change photo</Text></Pressable> : null}
         </View>
-      <View style={s.details}>
+      <View style={[s.details, compactLayout && s.detailsCompact]}>
           <View style={s.modelPickerBlock}>
             <Pressable accessibilityRole="button" accessibilityLabel={`Image model: ${selectedImageModel.name}. Choose a model.`} onPress={() => setModelPickerOpen(true)} style={({ pressed }) => [s.modelPicker, pressed && s.actionPressed]}>
               <SmallCaps style={s.modelPickerLabel}>AI MODEL</SmallCaps><Text numberOfLines={1} style={s.modelPickerName}>{selectedImageModel.name}</Text><Text style={s.modelPickerChevron}>⌄</Text>
             </Pressable>
           </View>
-          <View style={s.actionDock}>
+          <View style={[s.actionDock, compactLayout && s.actionDockCompact]}>
             <Pressable accessibilityLabel="Add instructions for AI look generation" onPress={() => { setInstructionDraft(generationInstructions); setInstructionOpen(true); }} style={({ pressed }) => [s.actionItem, pressed && s.actionPressed]}>
               <View><Text style={[s.actionIcon, generationInstructions.trim() && s.actionActive]}>✎</Text>{generationInstructions.trim() ? <View style={s.actionDot} /> : null}</View>
               <Text style={[s.actionLabel, generationInstructions.trim() && s.actionActive]}>Instructions</Text>
@@ -257,8 +275,10 @@ export default function StyleScreen() {
           </View>
           <Text style={s.helpText}>{!generationCooldownLoaded ? 'Checking generation availability…' : generationCooldownSeconds > 0 ? `Next AI look available in ${formatCooldown(generationCooldownSeconds)}.` : savedLook?.generationStatus === 'failed' ? savedLook.generationError || 'Image generation failed. You can retry.' : savedLook?.generationStatus === 'running' && !generating ? 'Generation took too long. Tap Retry AI look.' : saveMessage || (!bodyPhotoPath ? 'Add your photo, then choose wardrobe pieces to save a style.' : !selections.length ? 'Swap in at least one piece from your wardrobe to save a style.' : selections.length > maxWardrobeItemsForModel(imageGenerationModel) ? `You can save all selected pieces, but ${selectedImageModel.name} accepts your photo plus up to ${maxWardrobeItemsForModel(imageGenerationModel)} wardrobe pieces.` : selectedCategories.includes('Tops') && selectedCategories.includes('Outerwear') ? 'Your AI try-on will layer the selected top under your outerwear.' : `${selections.length} ${selections.length === 1 ? 'piece' : 'pieces'} selected. ${selectedImageModel.name} supports up to ${maxWardrobeItemsForModel(imageGenerationModel)} wardrobe pieces with your photo.`)}</Text>
         </View>
+        </View>
       </ScrollView>
       <OnboardingTour visible={tourVisible} onFinish={() => { setTourVisible(false); void completeOnboarding(); }} />
+      <SignOutConfirmationModal visible={signOutConfirmOpen} onCancel={() => setSignOutConfirmOpen(false)} onConfirm={leaveAccount} busy={signingOut} />
       <Modal visible={swapOpen} transparent animationType="slide" onRequestClose={() => setSwapOpen(false)}>
         <Pressable style={s.backdrop} onPress={() => setSwapOpen(false)} accessibilityLabel="Close wardrobe picker">
           <Pressable style={s.modal} onPress={(event) => event.stopPropagation()}>
@@ -355,10 +375,11 @@ export default function StyleScreen() {
 }
 
 const makeStyles = (palette: ThemeColors) => StyleSheet.create({
-  screen: { flex: 1, backgroundColor: palette.paper }, logoutIcon: { width: 22, height: 22, justifyContent: 'center' }, logoutDoor: { position: 'absolute', right: 2, top: 2, width: 2, height: 18, borderRadius: 1, backgroundColor: palette.ink }, logoutArrow: { position: 'absolute', left: 2, top: 10, width: 14, height: 2, borderRadius: 1, backgroundColor: palette.ink }, logoutArrowTop: { position: 'absolute', left: 10, top: 6, width: 2, height: 10, borderRadius: 1, backgroundColor: palette.ink, transform: [{ rotate: '45deg' }] }, logoutArrowBottom: { position: 'absolute', left: 10, top: 10, width: 2, height: 10, borderRadius: 1, backgroundColor: palette.ink, transform: [{ rotate: '-45deg' }] },
-  titleRow: { paddingHorizontal: 24, paddingTop: 8, paddingBottom: 18, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end' },
+  screen: { flex: 1, backgroundColor: palette.paper }, scrollContent: { flexGrow: 1 },
+  titleRow: { paddingHorizontal: 24, paddingTop: 8, paddingBottom: 18, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end' }, titleRowCompact: { paddingHorizontal: 20, paddingTop: 1, paddingBottom: 8 },
   titleInputWrap: { flex: 1, marginRight: 12 }, lookTitle: { fontSize: 23, fontWeight: '500', color: palette.ink, marginTop: 5, letterSpacing: -0.6, minWidth: 160, paddingVertical: 0 }, link: { fontSize: 12, fontWeight: '600', color: palette.olive, paddingVertical: 8 },
-  stage: { marginHorizontal: 13, borderRadius: radii.stage, backgroundColor: palette.canvas, overflow: 'hidden' }, model: { width: '100%', height: '100%' },
+  stage: { marginHorizontal: 13, borderRadius: radii.stage, backgroundColor: palette.canvas, overflow: 'hidden' }, mobileMainArea: { flex: 1, justifyContent: 'space-between' }, stageCompact: { flexGrow: 1, flexShrink: 1, minHeight: 245, maxHeight: 410, marginHorizontal: 10, borderRadius: 22 }, model: { width: '100%', height: '100%' },
+  addPhotoPrompt: { position: 'absolute', left: '50%', top: '42%', width: 190, minHeight: 72, marginLeft: -95, borderRadius: 18, borderWidth: 1, borderStyle: 'dashed', borderColor: palette.olive, backgroundColor: palette.surface, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 9, zIndex: 1 }, addPhotoIcon: { color: palette.olive, fontSize: 22, lineHeight: 26, fontWeight: '500' }, addPhotoText: { color: palette.ink, fontSize: 13, fontWeight: '700' },
   comparisonClip: { position: 'absolute', top: 0, overflow: 'hidden' }, comparisonLabels: { position: 'absolute', top: 12, left: 0, flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 12, zIndex: 9 }, comparisonLabel: { color: '#fff', backgroundColor: '#111A', overflow: 'hidden', paddingHorizontal: 9, paddingVertical: 5, borderRadius: 99, fontSize: 8, fontWeight: '800', letterSpacing: 1 }, comparisonHandle: { position: 'absolute', top: 0, width: 44, alignItems: 'center', justifyContent: 'center', zIndex: 10, elevation: 10 }, comparisonRule: { position: 'absolute', width: 2, height: '100%', backgroundColor: '#fff', shadowColor: '#000', shadowOpacity: 0.35, shadowRadius: 4 }, comparisonKnob: { width: 38, height: 38, borderRadius: 19, backgroundColor: palette.surface, borderWidth: 2, borderColor: palette.olive, alignItems: 'center', justifyContent: 'center', shadowColor: '#000', shadowOpacity: 0.25, shadowRadius: 5, elevation: 5 }, comparisonArrows: { color: palette.ink, fontSize: 19, fontWeight: '700' },
   piecePosition: { position: 'absolute', width: 64, height: 86 },
   piece: { width: '100%', height: '100%', borderRadius: 15, backgroundColor: palette.surface, alignItems: 'center', justifyContent: 'flex-start', paddingTop: 4, borderWidth: 1.5, borderColor: palette.surface },
@@ -370,12 +391,12 @@ const makeStyles = (palette: ThemeColors) => StyleSheet.create({
   emptyPieceLarge: { width: 74, height: 74 }, emptyPieceIcon: { fontSize: 18, color: palette.muted, lineHeight: 22 }, emptyPieceIconLarge: { fontSize: 23 },
   emptyPieceText: { fontSize: 7, fontWeight: '700', letterSpacing: 0.3, color: palette.muted, textAlign: 'center' }, emptyPieceTextLarge: { fontSize: 7 },
   changePhoto: { position: 'absolute', bottom: 14, right: 14, backgroundColor: palette.surface, paddingHorizontal: 11, paddingVertical: 8, borderRadius: 12 }, changePhotoText: { fontSize: 11, fontWeight: '600', color: palette.ink },
-  details: { marginHorizontal: 24, paddingTop: 8 },
+  details: { marginHorizontal: 24, paddingTop: 8 }, detailsCompact: { marginHorizontal: 18, paddingTop: 5 },
   modelPickerBlock: { marginBottom: 8 }, modelPicker: { minHeight: 43, flexDirection: 'row', alignItems: 'center', gap: 9, borderWidth: 1, borderColor: palette.line, borderRadius: 13, paddingHorizontal: 12, paddingVertical: 7, backgroundColor: palette.surface }, modelPickerLabel: { fontSize: 9, letterSpacing: 1.3 }, modelPickerName: { flex: 1, color: palette.ink, fontSize: 12, fontWeight: '700' }, modelPickerChevron: { color: palette.ink, fontSize: 20, paddingHorizontal: 4, lineHeight: 23 },
   modelBackdrop: { flex: 1, justifyContent: 'flex-end', backgroundColor: '#0006' }, modelSheet: { maxHeight: '82%', backgroundColor: palette.paper, borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 24, paddingBottom: 30 }, modelPickerDescription: { color: palette.muted, fontSize: 12, lineHeight: 18, marginTop: -8, marginBottom: 12 }, modelList: { flexGrow: 0 }, modelOption: { minHeight: 68, flexDirection: 'row', alignItems: 'center', gap: 12, borderWidth: 1, borderColor: palette.line, borderRadius: 15, paddingHorizontal: 14, paddingVertical: 11, marginBottom: 8, backgroundColor: palette.surface }, modelOptionSelected: { borderColor: palette.olive, backgroundColor: palette.oliveWash }, modelOptionLocked: { opacity: 0.55 }, modelOptionName: { color: palette.ink, fontSize: 13, fontWeight: '700' }, modelOptionNameLocked: { color: palette.muted }, modelOptionDetail: { color: palette.muted, fontSize: 11, marginTop: 4 }, modelKeyRequired: { color: palette.olive, fontSize: 10, fontWeight: '600', marginTop: 5 }, modelOptionCheck: { width: 22, height: 22, textAlign: 'center', overflow: 'hidden', color: palette.paper, backgroundColor: palette.line, borderRadius: 11, fontSize: 14, lineHeight: 22, fontWeight: '800' }, modelOptionCheckSelected: { backgroundColor: palette.olive }, modelCostNote: { color: palette.muted, fontSize: 10, lineHeight: 15, marginTop: 5 },
   generationBackdrop: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, backgroundColor: 'rgba(15, 16, 14, 0.56)' }, generationCard: { width: '100%', maxWidth: 360, alignItems: 'center', paddingHorizontal: 28, paddingVertical: 32, borderRadius: 26, backgroundColor: palette.paper, borderWidth: 1, borderColor: palette.line, shadowColor: '#000', shadowOpacity: 0.18, shadowRadius: 24, shadowOffset: { width: 0, height: 12 }, elevation: 14 }, generationSpinner: { width: 64, height: 64, borderRadius: 32, alignItems: 'center', justifyContent: 'center', backgroundColor: palette.oliveWash, marginBottom: 21 }, generationTitle: { color: palette.ink, fontSize: 24, lineHeight: 30, fontWeight: '700', letterSpacing: -0.7, marginTop: 8 }, generationCopy: { color: palette.muted, fontSize: 13, lineHeight: 19, textAlign: 'center', marginTop: 7 }, generationTimer: { color: palette.ink, fontSize: 46, lineHeight: 54, fontWeight: '800', letterSpacing: -1.8, marginTop: 22, fontVariant: ['tabular-nums'] }, generationTimerUnit: { color: palette.olive, fontSize: 22, letterSpacing: -0.4 }, generationElapsedLabel: { color: palette.muted, fontSize: 9, fontWeight: '800', letterSpacing: 1.7, marginTop: 0 }, generationCooldownNotice: { color: palette.olive, fontSize: 12, fontWeight: '700', marginTop: 13, fontVariant: ['tabular-nums'] },
   keyDialogWrap: { flex: 1, justifyContent: 'center', padding: 22 }, keyDialog: { width: '100%', maxWidth: 480, alignSelf: 'center', padding: 22, borderRadius: 24, backgroundColor: palette.paper }, keyDialogCopy: { color: palette.muted, fontSize: 12, lineHeight: 18, marginTop: -4, marginBottom: 18 }, keyInput: { height: 50, paddingHorizontal: 14, borderWidth: 1, borderColor: palette.line, borderRadius: 13, color: palette.ink, backgroundColor: palette.surface, marginBottom: 14 }, keySaveButton: { marginTop: 4 },
-  actionDock: { minHeight: 78, flexDirection: 'row', alignItems: 'stretch', borderWidth: 1, borderColor: palette.line, borderRadius: 19, overflow: 'hidden', backgroundColor: palette.surface },
+  actionDock: { minHeight: 78, flexDirection: 'row', alignItems: 'stretch', borderWidth: 1, borderColor: palette.line, borderRadius: 19, overflow: 'hidden', backgroundColor: palette.surface }, actionDockCompact: { minHeight: 70 },
   actionItem: { flex: 1, minWidth: 0, alignItems: 'center', justifyContent: 'center', gap: 6, paddingHorizontal: 3, paddingVertical: 10 },
   actionPrimary: { backgroundColor: palette.oliveWash }, actionPressed: { opacity: 0.68 }, actionDisabled: { opacity: 0.45 },
   actionDivider: { width: 1, height: 42, alignSelf: 'center', backgroundColor: palette.line },

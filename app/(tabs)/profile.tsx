@@ -3,7 +3,7 @@ import { useRouter, type Href } from 'expo-router';
 import { useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StatusBar, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { ActionButton, AppHeader, radii, RoundAction, SmallCaps } from '@/components/StyleoutUI';
+import { ActionButton, AppHeader, radii, RoundAction, SignOutConfirmationModal, SignOutIcon, SmallCaps } from '@/components/StyleoutUI';
 import { ThemeColors, ThemePreference, useStyleoutTheme } from '@/components/StyleoutTheme';
 import { PicChangeCarousel } from '@/components/PicChangeCarousel';
 import { LoadingImage } from '@/components/LoadingImage';
@@ -33,6 +33,7 @@ export default function ProfileScreen() {
   const [draftName, setDraftName] = useState(name);
   const [draftBio, setDraftBio] = useState(bio);
   const [signingOut, setSigningOut] = useState(false);
+  const [signOutConfirmOpen, setSignOutConfirmOpen] = useState(false);
   const [selectedLook, setSelectedLook] = useState<SavedLook | null>(null);
   const [imageFullscreen, setImageFullscreen] = useState(false);
   const [startingGeneration, setStartingGeneration] = useState(false);
@@ -58,6 +59,7 @@ export default function ProfileScreen() {
   }
   async function leaveAccount() {
     if (signingOut) return;
+    setSignOutConfirmOpen(false);
     setSigningOut(true);
     try { await signOut(); }
     catch { Alert.alert('Sign-out failed', 'Please try again.'); setSigningOut(false); }
@@ -117,7 +119,7 @@ export default function ProfileScreen() {
   return (
     <View style={s.screen}>
       <ScrollView contentContainerStyle={{ paddingBottom: 36 }} alwaysBounceVertical refreshControl={Platform.OS === 'web' ? undefined : <ClosetRefreshControl />}>
-        <AppHeader eyebrow="YOUR SPACE" title="Profile" right={profileTab === 'profile' ? <RoundAction label="Edit profile" onPress={beginEdit}><Text style={s.editIcon}>✎</Text></RoundAction> : null} />
+        <AppHeader title={profileTab === 'profile' ? 'Profile' : 'AI model key'} right={<View style={s.headerActions}>{profileTab === 'profile' ? <RoundAction label="Edit profile" onPress={beginEdit}><Text style={s.editIcon}>✎</Text></RoundAction> : null}<RoundAction label="Sign out" onPress={() => setSignOutConfirmOpen(true)} disabled={signingOut}><SignOutIcon /></RoundAction></View>} />
         <View style={s.profileTabs} accessibilityRole="tablist">
           <Pressable accessibilityRole="tab" accessibilityState={{ selected: profileTab === 'profile' }} onPress={() => setProfileTab('profile')} style={[s.profileTab, profileTab === 'profile' && s.profileTabActive]}><Text style={[s.profileTabText, profileTab === 'profile' && s.profileTabTextActive]}>Profile</Text></Pressable>
           <Pressable accessibilityRole="tab" accessibilityState={{ selected: profileTab === 'ai-key' }} onPress={() => setProfileTab('ai-key')} style={[s.profileTab, profileTab === 'ai-key' && s.profileTabActive]}><Text style={[s.profileTabText, profileTab === 'ai-key' && s.profileTabTextActive]}>AI model key</Text></Pressable>
@@ -148,7 +150,7 @@ export default function ProfileScreen() {
           {wardrobeExpanded ? CATEGORIES.map((category) => { const categoryItems = items.filter((item) => item.category === category); return <View key={category} style={s.categoryBlock}><View style={s.categoryRow}><Text style={s.categoryName}>{category}</Text><Text style={s.categoryCount}>{categoryItems.length} {categoryItems.length === 1 ? 'piece' : 'pieces'}</Text></View>{categoryItems.length ? <View style={s.categoryItems}>{categoryItems.map((item) => <Text key={item.id} style={s.categoryItem}>{item.name}</Text>)}</View> : <Text style={s.categoryEmpty}>No pieces added yet.</Text>}</View>; }) : <Text style={s.categoryHint}>{items.length ? `${items.length} pieces across ${new Set(items.map((item) => item.category)).size} categories` : 'Tap to see your wardrobe categories.'}</Text>}
         </View>
         <View style={s.appearance}><SmallCaps>APPEARANCE</SmallCaps><Text style={s.appearanceTitle}>Choose your theme</Text><Text style={s.appearanceHint}>Use your device setting or pick a look for Styleout.</Text><View style={s.themeChoices}>{(['system', 'light', 'dark'] as ThemePreference[]).map((option) => <Pressable key={option} accessibilityRole="button" accessibilityState={{ selected: preference === option }} onPress={() => { void setPreference(option); }} style={[s.themeChoice, preference === option && s.themeChoiceActive]}><Text style={[s.themeChoiceText, preference === option && s.themeChoiceTextActive]}>{option === 'system' ? 'System' : option === 'light' ? 'Light' : 'Dark'}</Text></Pressable>)}</View><Text style={s.themeState}>{isDark ? 'Dark appearance is on' : 'Light appearance is on'}</Text></View>
-        <View style={s.account}><SmallCaps>ACCOUNT</SmallCaps><Text style={s.accountEmail}>{user?.primaryEmailAddress?.emailAddress || 'Signed in with Clerk'}</Text><Pressable onPress={leaveAccount} disabled={signingOut} style={s.signOut}><Text style={s.signOutText}>{signingOut ? 'Signing out…' : 'Sign out'}</Text><Text style={s.signOutText}>↗</Text></Pressable><Pressable onPress={() => { setDeleteConfirmation(''); setDeleteAccountOpen(true); }} accessibilityRole="button" style={s.deleteAccountButton}><Text style={s.deleteAccountText}>Delete account</Text></Pressable></View>
+        <View style={s.account}><SmallCaps>ACCOUNT</SmallCaps><Text style={s.accountEmail}>{user?.primaryEmailAddress?.emailAddress || 'Signed in with Clerk'}</Text><Pressable onPress={() => setSignOutConfirmOpen(true)} disabled={signingOut} style={s.signOut}><Text style={s.signOutText}>{signingOut ? 'Signing out…' : 'Sign out'}</Text><Text style={s.signOutText}>↗</Text></Pressable><Pressable onPress={() => { setDeleteConfirmation(''); setDeleteAccountOpen(true); }} accessibilityRole="button" style={s.deleteAccountButton}><Text style={s.deleteAccountText}>Delete account</Text></Pressable></View>
         </> : <View style={s.gatewayKeyPanel}>
           <SmallCaps>MODEL ACCESS</SmallCaps>
           <Text style={s.gatewayKeyTitle}>Your AI Gateway key</Text>
@@ -212,13 +214,14 @@ export default function ProfileScreen() {
           </Pressable>
         </Pressable>
       </Modal>
+      <SignOutConfirmationModal visible={signOutConfirmOpen} onCancel={() => setSignOutConfirmOpen(false)} onConfirm={leaveAccount} busy={signingOut} />
       <PicChangeCarousel visible={photoPickerOpen} onClose={() => setPhotoPickerOpen(false)} />
     </View>
   );
 }
 
 const makeStyles = (palette: ThemeColors) => StyleSheet.create({
-  screen: { flex: 1, backgroundColor: palette.paper }, editIcon: { fontSize: 23, color: palette.ink },
+  screen: { flex: 1, backgroundColor: palette.paper }, headerActions: { flexDirection: 'row', alignItems: 'center', gap: 8 }, editIcon: { fontSize: 23, color: palette.ink },
   profileTabs: { marginHorizontal: 24, marginBottom: 5, padding: 4, borderRadius: 15, backgroundColor: palette.canvas, flexDirection: 'row', gap: 4 }, profileTab: { flex: 1, minHeight: 40, alignItems: 'center', justifyContent: 'center', borderRadius: 11 }, profileTabActive: { backgroundColor: palette.ink }, profileTabText: { color: palette.muted, fontSize: 12, fontWeight: '600' }, profileTabTextActive: { color: palette.paper },
   gatewayKeyPanel: { paddingHorizontal: 24, paddingTop: 32, paddingBottom: 28 }, gatewayKeyTitle: { color: palette.ink, fontSize: 23, fontWeight: '600', letterSpacing: -0.5, marginTop: 8 }, gatewayKeyCopy: { color: palette.muted, fontSize: 13, lineHeight: 20, marginTop: 9, marginBottom: 21 }, gatewayStatus: { minHeight: 46, flexDirection: 'row', alignItems: 'center', gap: 9, borderWidth: 1, borderColor: palette.line, borderRadius: 13, paddingHorizontal: 13, marginBottom: 22, backgroundColor: palette.surface }, gatewayStatusDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: palette.muted }, gatewayStatusDotOn: { backgroundColor: palette.olive }, gatewayStatusText: { color: palette.ink, fontSize: 12, fontWeight: '600' }, gatewaySaveButton: { marginTop: -9 }, gatewayRemove: { alignSelf: 'center', paddingHorizontal: 12, paddingVertical: 14 }, gatewayRemoveText: { color: palette.danger, fontSize: 12, fontWeight: '600' }, gatewayNotice: { marginTop: 20, padding: 15, borderRadius: 14, backgroundColor: palette.oliveWash }, gatewayNoticeTitle: { color: palette.ink, fontSize: 12, fontWeight: '700' }, gatewayNoticeCopy: { color: palette.muted, fontSize: 11, lineHeight: 17, marginTop: 5 },
   tourLink: { marginHorizontal: 24, marginTop: 17, borderRadius: 16, borderWidth: 1, borderColor: palette.line, backgroundColor: palette.surface, paddingHorizontal: 15, paddingVertical: 13, flexDirection: 'row', alignItems: 'center', gap: 12 }, tourLinkIcon: { color: palette.olive, fontSize: 20 }, tourLinkTitle: { color: palette.ink, fontSize: 13, fontWeight: '600' }, tourLinkCopy: { color: palette.muted, fontSize: 11, marginTop: 3 }, tourLinkArrow: { color: palette.olive, fontSize: 16 },

@@ -74,6 +74,7 @@ type ClosetState = {
   removeItem: (id: string) => Promise<void>;
   updateProfile: (name: string, bio: string) => Promise<void>;
   setBodyPhoto: (uri: string) => Promise<void>;
+  clearBodyPhoto: () => Promise<void>;
   selectMainPhoto: (path: string) => Promise<void>;
   deleteMainPhoto: (path: string) => Promise<void>;
   refreshCloset: () => Promise<void>;
@@ -568,6 +569,16 @@ export function ClosetProvider({ children, userId }: { children: React.ReactNode
         throw error;
       }
     },
+    clearBodyPhoto: async () => {
+      if (!userId) throw new Error('Sign in to remove your photo.');
+      const { error } = await client.from('styleout_profiles').upsert({
+        user_id: userId, display_name: name, bio, main_image_path: null, updated_at: new Date().toISOString(),
+      }, { onConflict: 'user_id' });
+      if (error) throw error;
+      // Keep the image in storage so it remains available in the photo carousel.
+      setBodyPhotoPath(null);
+      setBodyPhotoState(null);
+    },
     selectMainPhoto: async (path) => {
       if (!userId) throw new Error('Sign in to choose your photo.');
       const uri = await signedImage(client, path);
@@ -784,5 +795,5 @@ const styles = StyleSheet.create({
   heading: { fontSize: 23, color: palette.ink, fontWeight: '600', textAlign: 'center' },
   copy: { marginTop: 12, color: palette.muted, textAlign: 'center', lineHeight: 20 },
   retry: { marginTop: 25, paddingHorizontal: 20, paddingVertical: 12, borderRadius: 12, backgroundColor: palette.ink },
-  retryText: { color: '#fff', fontWeight: '600' },
+  retryText: { color: palette.paper, fontWeight: '600' },
 });
