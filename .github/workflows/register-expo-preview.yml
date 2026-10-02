@@ -1,18 +1,16 @@
-name: Register Expo preview deployment
+name: Register Expo production deployment
 
 on:
   push:
     branches:
       - main
-    paths:
-      - .github/workflows/register-expo-preview.yml
   workflow_dispatch:
     inputs:
       deployment_url:
-        description: Active Expo EAS web deployment URL
-        required: true
+        description: Expo EAS production URL (defaults to the stable production domain)
+        required: false
         type: string
-        default: https://styleout--wiyoiyn3vl.expo.app/
+        default: https://styleout.expo.app/
 
 permissions:
   contents: read
@@ -26,7 +24,7 @@ jobs:
       - name: Register Expo preview URL
         uses: actions/github-script@v7
         env:
-          EXPO_DEPLOYMENT_URL: ${{ inputs.deployment_url || 'https://styleout--wiyoiyn3vl.expo.app/' }}
+          EXPO_DEPLOYMENT_URL: ${{ inputs.deployment_url || 'https://styleout.expo.app/' }}
         with:
           script: |
             const url = process.env.EXPO_DEPLOYMENT_URL.trim();
@@ -49,7 +47,7 @@ jobs:
               environment: 'production',
               auto_merge: false,
               required_contexts: [],
-              description: 'Expo EAS web preview',
+              description: 'Expo EAS production deployment',
               payload: { deployment_url: parsed.toString() },
             });
 
@@ -59,5 +57,5 @@ jobs:
               state: 'success',
               environment_url: parsed.toString(),
               log_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
-              description: 'Expo preview is live',
+              description: 'Expo production site is live',
             });
